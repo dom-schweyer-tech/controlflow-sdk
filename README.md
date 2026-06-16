@@ -25,23 +25,74 @@ pip install -e ".[dev]"
 ### 1. Initialize a project
 
 ```bash
-cflow init --name my-controls
-cd my-controls
+cflow init my-audit
+cd my-audit
 ```
 
-This scaffolds:
-- `control.yaml` — control metadata (title, objective, data sources, framework references)
-- `test.py` — a test function that executes on the population
+`init` takes a single positional argument — the directory name. This scaffolds:
 
-### 2. Author a control
+- `cflow.yaml` — project metadata (name, framework, system)
+- `sources.yaml` — data source definitions (CSV, Parquet, or Excel files)
+- `controls/` — directory where each control lives in its own subdirectory
 
-Edit `control.yaml`:
+### 2. Add a data source
+
+Edit `sources.yaml` to declare the data files your controls will test against.
+Each source gets a unique `id` that controls reference by name:
 
 ```yaml
-id: CTL-001
+sources:
+  - id: users
+    type: file
+    config:
+      path: data/users.csv
+      format: csv
+    key_config:
+      mode: single
+      columns:
+        - user_id
+    column_mappings:
+      - original_name: user_id
+        display_name: User ID
+        data_type: text
+        is_key: true
+        include: true
+      - original_name: can_create
+        display_name: Can Create
+        data_type: boolean
+        is_key: false
+        include: true
+      - original_name: can_approve
+        display_name: Can Approve
+        data_type: boolean
+        is_key: false
+        include: true
+```
+
+Place the matching CSV at `data/users.csv`:
+
+```
+user_id,can_create,can_approve
+U001,true,false
+U002,true,true
+U003,false,true
+```
+
+### 3. Scaffold a control
+
+```bash
+cflow new control ctl-001
+```
+
+This creates `controls/ctl-001/control.yaml` and `controls/ctl-001/test.py`.
+
+Edit `controls/ctl-001/control.yaml` to describe the control and bind it to sources:
+
+```yaml
+id: ctl-001
 title: Segregation of Duties
-objective: Verify no user has both create and approve permissions
-narrative: |
+objective: Verify no user has both create and approve permissions.
+narrative: >
   All transactions require dual approval. This control ensures
   users cannot both create and approve their own transactions.
 framework_refs:
@@ -49,38 +100,46 @@ framework_refs:
     - AC-2
     - AC-5
 sources:
-  - id: users-permissions
-    type: csv
-    path: data/user-permissions.csv
-    key_columns: [user_id]
+  - id: users
 ```
 
-Edit `test.py`:
+Sources are listed as `- id: <source-id>`, referencing entries defined in `sources.yaml`.
+Do **not** put `type`, `path`, or `key_columns` directly in `control.yaml` — those belong in `sources.yaml`.
+
+Edit `controls/ctl-001/test.py`:
 
 ```python
-from controlflow_sdk import Violation, Severity, Population
-
-
-def test(populations: list[Population]) -> list[Violation]:
+def test(pop):
     """Check for users with both create and approve permissions."""
     violations = []
-    pop = populations[0]  # First bound data source
-    
     for _, row in pop.df.iterrows():
         if row.get("can_create") and row.get("can_approve"):
-            violations.append(
-                Violation(
-                    item_key=row["user_id"],
-                    description="User has both create and approve permissions",
-                    severity=Severity.HIGH,
-                    details={"permissions": ["create", "approve"]},
-                )
-            )
-    
+            violations.append({
+                "item_key": str(row["user_id"]),
+                "description": "User has both create and approve permissions",
+                "severity": "high",
+                "details": {"user_id": str(row["user_id"])},
+            })
     return violations
 ```
 
-### 3. Validate the control
+The `test` function:
+- Receives a single `pop` argument — a `Population` object whose `.df` is a pandas DataFrame
+- Returns a **list of dicts**, each with at minimum `item_key` and `description`
+- Returns an empty list when all records pass
+
+Each violation dict shape:
+
+```python
+{
+    "item_key": "U002",          # required — unique row identifier
+    "description": "...",        # required — why this item is a violation
+    "severity": "high",          # optional — "low" | "medium" | "high" | "critical"
+    "details": {"key": "value"}, # optional — additional context
+}
+```
+
+### 4. Validate the control
 
 ```bash
 cflow validate
@@ -88,13 +147,10 @@ cflow validate
 
 This checks:
 - `control.yaml` syntax and schema
-- `test.py` function signature and imports
-- Data source paths are readable
-- Output violations match the expected shape
+- Source IDs in `control.yaml` resolve to entries in `sources.yaml`
+- Data source file paths are referenced correctly
 
-### 4. Run the control
-
-Once your control is authored and passes validation, execute it against the full population:
+### 5. Run the control
 
 ```bash
 cflow run
@@ -103,111 +159,109 @@ cflow run
 This will:
 1. Load your control and all bound data sources
 2. Execute your `test()` function against **the complete population** (no sampling)
-3. Write three types of output to the `target/` directory:
-   - Markdown workpapers: `target/workpapers/<control-id>.md`
-   - HTML workpapers: `target/workpapers/<control-id>.html` (open in browser)
-   - Violation evidence: `target/evidence/<control-id>-violations.json`
-   - Immutable run log: `target/run-log.json` (JSONL, append-only)
+3. Write output to the `target/` directory
 
 #### Output Directory Structure
 
 ```
 target/
 ├── workpapers/           # Ready-to-share, signed workpapers
-│   ├── CTL-001.md        # Markdown (portable, git-friendly)
-│   └── CTL-001.html      # HTML (open in browser, styled)
+│   ├── ctl-001.md        # Markdown (portable, git-friendly)
+│   └── ctl-001.html      # HTML (open in browser, styled)
 ├── evidence/             # Raw violation data
-│   └── CTL-001-violations.json  # JSON array of violations
+│   └── ctl-001-violations.json  # JSON array of violations
 └── run-log.json          # Immutable JSONL ledger of all runs
+```
+
+#### Running a Single Control
+
+```bash
+cflow run --control ctl-001
+```
+
+#### Custom Execution Timestamp
+
+```bash
+cflow run --at 2026-06-16T14:30:00Z
 ```
 
 #### Run Provenance & Reproducibility
 
 Every run records:
 - **Execution timestamp** (`executed_at`) — ISO-8601, immutable
-- **Data provenance** — sha256 hash + row count for each bound data source
+- **Data provenance** — sha256 hash + row count for each bound data source (recorded as the relative `path` from `sources.yaml`)
 - **Run ID** — deterministic 16-char identifier (derived from control ID, timestamp, and data hashes)
 
-This ensures every execution is:
-- **Auditable** — know exactly what data was tested
-- **Reproducible** — same inputs always yield the same run ID
-- **Traceable** — full history in `target/run-log.json`
+### 6. Build an import bundle
 
-#### Running a Single Control
-
-To run only one control, use `--control`:
+Once you have runs, package them into a zip for import into ControlFlow:
 
 ```bash
-cflow run --control CTL-001
+cflow build
 ```
 
-#### Custom Execution Timestamp
+This reads `target/run-log.json`, assembles a validated manifest, and writes `import-bundle.zip`
+(or a custom path with `--out`).
 
-By default, `cflow run` uses the current UTC time. To specify a fixed timestamp (e.g., for testing or historical runs):
-
-```bash
-cflow run --at 2026-06-16T14:30:00Z
+```
+cflow build --out exports/my-bundle.zip
 ```
 
-## Features Roadmap
+## Features
 
-- **Phase 1:** Control authoring, validation, project discovery ✓
-- **Phase 2 (current):** `cflow run` — execute tests against full populations, write provenanced workpapers ✓
-- **Phase 3:** `cflow build` — package and export importable bundles for ControlFlow (not yet available)
+- `cflow init <dir>` — scaffold a new project
+- `cflow new control <slug>` — scaffold a new control
+- `cflow validate [dir]` — validate all controls against `sources.yaml`
+- `cflow run [dir]` — execute tests, write workpapers and evidence
+- `cflow build [dir]` — package runs into an importable zip bundle
 
 ## API Reference
 
-### `Violation`
+### `Population`
+
+The `test` function receives a single `Population` object:
 
 ```python
-from controlflow_sdk import Violation, Severity
-
-v = Violation(
-    item_key="INV-12345",
-    description="Amount exceeds approval threshold",
-    severity=Severity.MEDIUM,  # low, medium, high, critical
-    details={"amount": 50000, "threshold": 25000},
-)
-
-# Convert to dict for serialization
-d = v.to_dict()
+def test(pop):
+    # pop.df         → pandas DataFrame (rows = data records)
+    # pop.columns    → list of ColumnMeta objects
+    # pop.source_id  → str (data source ID from sources.yaml)
+    # pop.size       → int (number of rows)
+    # pop.key_columns → list[str] (key column names)
+    violations = []
+    for _, row in pop.df.iterrows():
+        if some_condition(row):
+            violations.append({
+                "item_key": str(row["key_col"]),
+                "description": "Reason for violation",
+            })
+    return violations
 ```
 
-### `Severity`
+The function returns a **list of dicts** (not `Violation` objects, not `list[Population]`).
 
-An enumeration: `low`, `medium` (default), `high`, `critical`.
+### `ColumnMeta`
 
-```python
-from controlflow_sdk import Severity
-
-sev = Severity.HIGH  # or .coerce("high"), .coerce(None) → MEDIUM
-```
-
-### `Population` (type hint)
-
-Available for type hints in test functions:
-
-```python
-from controlflow_sdk import Population
-
-def test(populations: list[Population]) -> list[Violation]:
-    pop = populations[0]
-    # pop.df → pandas DataFrame
-    # pop.columns → list[ColumnMeta]
-    # pop.source_id → str (data source ID)
-    ...
-```
-
-### `ColumnMeta` (type hint)
-
-Available for type hints describing column metadata:
+Column metadata available on `pop.columns`:
 
 ```python
 from controlflow_sdk import ColumnMeta
 
-# Used internally; exposed for type completeness
-col = ColumnMeta(original_name="user_id", display_name="User ID", is_key=True)
+# col.original_name  → str (column name from the source file)
+# col.display_name   → str (human-readable label from sources.yaml)
+# col.data_type      → str ("text" | "number" | "date" | "boolean")
+# col.is_key         → bool
+# col.include        → bool
 ```
+
+### Data types in `sources.yaml`
+
+| `data_type` | pandas dtype | Notes |
+|-------------|-------------|-------|
+| `text`      | `str`       | Default; `NaN` becomes `""` |
+| `number`    | `float64`   | Non-numeric values become `NaN` |
+| `date`      | `datetime64`| Non-parseable values become `NaT` |
+| `boolean`   | `bool`      | Recognises `true/false`, `1/0`, `yes/no` |
 
 ## License
 

@@ -200,7 +200,7 @@ class CsvSource(Source):
             self._row_count = len(pd.read_csv(self._path, dtype=str))
 
         return {
-            "path": str(self._path),
+            "path": self._binding.config["path"],
             "sha256": sha256,
             "row_count": self._row_count,
         }
@@ -253,7 +253,7 @@ class ParquetSource(Source):
             self._row_count = len(pd.read_parquet(self._path))
 
         return {
-            "path": str(self._path),
+            "path": self._binding.config["path"],
             "sha256": sha256,
             "row_count": self._row_count,
         }
@@ -311,7 +311,7 @@ class XlsxSource(Source):
             )
 
         return {
-            "path": str(self._path),
+            "path": self._binding.config["path"],
             "sha256": sha256,
             "row_count": self._row_count,
         }

@@ -12,6 +12,8 @@ import json
 import pathlib
 import tempfile
 
+import pytest
+
 from controlflow_sdk.bundle import read_bundle, write_bundle
 
 # ---------------------------------------------------------------------------
@@ -254,3 +256,35 @@ def test_write_bundle_returns_out_path() -> None:
         result = write_bundle(manifest, target_dir, out_path)
 
         assert result is out_path
+
+
+# ---------------------------------------------------------------------------
+# read_bundle error edges
+# ---------------------------------------------------------------------------
+
+
+def test_read_bundle_raises_key_error_when_no_manifest() -> None:
+    """read_bundle raises KeyError when the zip contains no manifest.json."""
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_path = pathlib.Path(tmpdir) / "no_manifest.zip"
+        with zipfile.ZipFile(out_path, "w") as zf:
+            zf.writestr("other.json", '{"note": "not a manifest"}')
+
+        with pytest.raises(KeyError):
+            read_bundle(out_path)
+
+
+def test_read_bundle_raises_json_decode_error_for_invalid_json() -> None:
+    """read_bundle raises json.JSONDecodeError when manifest.json contains invalid JSON."""
+    import json
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_path = pathlib.Path(tmpdir) / "bad_json.zip"
+        with zipfile.ZipFile(out_path, "w") as zf:
+            zf.writestr("manifest.json", "this is not valid JSON {{{")
+
+        with pytest.raises(json.JSONDecodeError):
+            read_bundle(out_path)

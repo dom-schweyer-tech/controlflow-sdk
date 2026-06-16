@@ -79,10 +79,7 @@ def _build_workpaper(
     (mirrors ``Workpaper.assemble``).  When there are no runs the workpaper has
     an empty ``procedures`` list.
     """
-    framework_refs: dict[str, Any] = {
-        "extra": {k: list(v) for k, v in control.framework_refs.extra.items()},
-        "nist": list(control.framework_refs.nist),
-    }
+    framework_refs = _serialise_framework_refs(control)
 
     if not runs:
         return {

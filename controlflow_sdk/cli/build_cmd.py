@@ -66,6 +66,11 @@ def build_cmd(args: argparse.Namespace) -> int:
         control_id = run.get("control_id", "")
         if control_id:
             runs_by_control[control_id].append(run)
+        else:
+            print(
+                f"warning: skipping run with no control_id: {run.get('run_id', '?')}",
+                file=sys.stderr,
+            )
 
     total_runs = sum(len(v) for v in runs_by_control.values())
     control_count = len(runs_by_control)
