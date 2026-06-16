@@ -1,0 +1,169 @@
+"""TDD tests for the render module (Task 6).
+
+Step 1: write failing tests.
+Step 3: implement renderers so these pass.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from controlflow_sdk.model.run import RunRecord, SourceProvenance
+from controlflow_sdk.model.violation import Severity, Violation
+from controlflow_sdk.model.workpaper import Procedure, Workpaper
+from controlflow_sdk.render import render_html, render_markdown
+
+# ── shared fixture ────────────────────────────────────────────────────────────
+
+XSS_DESCRIPTION = "Bad data with <b>bold</b> & 'quotes'"
+
+
+@pytest.fixture()
+def workpaper() -> Workpaper:
+    """Build a Workpaper directly (no filesystem I/O needed)."""
+    prov = SourceProvenance(
+        source_id="src-1",
+        path="/data/invoices.csv",
+        sha256="abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+        row_count=100,
+    )
+    run = RunRecord(
+        control_id="ctrl-001",
+        executed_at="2026-06-16T00:00:00Z",
+        population_size=100,
+        violations=[
+            Violation(
+                item_key="INV-001",
+                description="Amount exceeds limit",
+                severity=Severity.HIGH,
+            ),
+            Violation(
+                item_key="INV-002",
+                description=XSS_DESCRIPTION,
+                severity=Severity.CRITICAL,
+            ),
+        ],
+        provenance=[prov],
+    )
+    procedure = Procedure(
+        title="Invoice Threshold Test",
+        narrative="All invoices over $1,000 require dual approval.",
+        test_code="result = df[df['amount'] > 1000]",
+        result=run,
+    )
+    return Workpaper(
+        control_id="ctrl-001",
+        title="Invoice Amount Control",
+        objective="Ensure no invoices exceed approved limits.",
+        narrative="Control owner: Finance team.",
+        framework_refs={"nist": ["AC-2", "AU-6"], "extra": {}},
+        procedures=[procedure],
+        generated_at="2026-06-16T00:00:00Z",
+    )
+
+
+# ── render_markdown tests ─────────────────────────────────────────────────────
+
+
+class TestRenderMarkdown:
+    def test_contains_control_title(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "Invoice Amount Control" in md
+
+    def test_contains_pass_rate(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        # pass_rate = (100 - 2) / 100 * 100 = 98.0
+        assert "98.0" in md
+
+    def test_contains_each_violation_item_key(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "INV-001" in md
+        assert "INV-002" in md
+
+    def test_contains_source_sha256(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        prov = workpaper.procedures[0].result.provenance[0]
+        assert prov.sha256 in md
+
+    def test_contains_objective(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "Ensure no invoices exceed approved limits." in md
+
+    def test_contains_framework_refs(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "AC-2" in md
+        assert "AU-6" in md
+
+    def test_contains_test_code_fenced_block(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "```" in md
+        assert "result = df[df['amount'] > 1000]" in md
+
+    def test_contains_passed_and_failed_counts(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "98" in md  # passed
+        assert "2" in md  # failed
+
+    def test_contains_provenance_path(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "/data/invoices.csv" in md
+
+    def test_contains_row_count(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "100" in md
+
+
+# ── render_html tests ─────────────────────────────────────────────────────────
+
+
+class TestRenderHtml:
+    def test_starts_with_doctype(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        assert html.startswith("<!doctype html>")
+
+    def test_no_script_tags(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        assert "<script" not in html.lower()
+
+    def test_escapes_xss_description(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        # The raw <b> must not appear; escaped form must appear
+        assert "<b>" not in html
+        assert "&lt;b&gt;" in html
+
+    def test_contains_control_title(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        assert "Invoice Amount Control" in html
+
+    def test_contains_pass_rate(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        assert "98.0" in html
+
+    def test_contains_each_violation_item_key(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        assert "INV-001" in html
+        assert "INV-002" in html
+
+    def test_contains_source_sha256(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        prov = workpaper.procedures[0].result.provenance[0]
+        assert prov.sha256 in html
+
+    def test_has_inline_style(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        assert "<style>" in html
+
+    def test_no_external_stylesheet_link(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        assert 'rel="stylesheet"' not in html
+        assert "<link" not in html
+
+    def test_escapes_ampersand_in_description(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        # XSS_DESCRIPTION contains & which must be escaped
+        assert "&amp;" in html
+
+    def test_contains_framework_refs(self, workpaper: Workpaper) -> None:
+        html = render_html(workpaper)
+        assert "AC-2" in html
+        assert "AU-6" in html
