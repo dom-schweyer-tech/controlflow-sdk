@@ -76,6 +76,74 @@ def coerce_series(series: pd.Series, data_type: str) -> pd.Series:  # type: igno
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers (DRY across CsvSource / ParquetSource / XlsxSource)
+# ---------------------------------------------------------------------------
+
+
+def _hash_file(path: Path) -> str:
+    """Return the SHA-256 hex digest of the raw bytes of *path*."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _apply_mappings(
+    raw_df: pd.DataFrame,
+    column_mappings: list[dict[str, Any]],
+    key_config: dict[str, Any],
+    source_id: str,
+) -> Population:
+    """Apply column mappings + coercions to *raw_df* and return a :class:`Population`.
+
+    This is the single implementation of the mapping/coercion contract shared
+    by all file-based sources (CSV, Parquet, Excel).  Each source calls this
+    after loading its raw DataFrame.
+
+    Parameters
+    ----------
+    raw_df:
+        The DataFrame as returned by the format-specific reader.  Column
+        names must match ``original_name`` values in *column_mappings*.
+    column_mappings:
+        List of column-mapping dicts from :class:`SourceBinding`.
+    key_config:
+        Key configuration dict; ``key_config["columns"]`` is the list of
+        ``original_name`` values that form the row key.
+    source_id:
+        The binding id, forwarded to :class:`Population`.
+    """
+    mapping_by_name: dict[str, dict[str, Any]] = {cm["original_name"]: cm for cm in column_mappings}
+    key_cols: set[str] = set(key_config.get("columns", []))
+
+    columns: list[ColumnMeta] = []
+    kept_series: dict[str, pd.Series] = {}  # type: ignore[type-arg]
+
+    for original_name, spec in mapping_by_name.items():
+        if not spec.get("include", True):
+            continue
+
+        if original_name not in raw_df.columns:
+            # Column declared in mappings but absent from file — skip
+            continue
+
+        data_type: str = spec.get("data_type", "text")
+        coerced = coerce_series(raw_df[original_name], data_type)
+        kept_series[original_name] = coerced
+
+        is_key = original_name in key_cols
+        columns.append(
+            ColumnMeta(
+                original_name=original_name,
+                display_name=spec.get("display_name", original_name),
+                data_type=data_type,
+                is_key=is_key,
+                include=True,
+            )
+        )
+
+    result_df = pd.DataFrame(kept_series)
+    return Population(df=result_df, columns=columns, source_id=source_id)
+
+
+# ---------------------------------------------------------------------------
 # CsvSource
 # ---------------------------------------------------------------------------
 
@@ -106,44 +174,11 @@ class CsvSource(Source):
     def load(self) -> Population:
         """Read the CSV, apply column mappings, and return a :class:`Population`."""
         raw_df = pd.read_csv(self._path, dtype=str)  # read everything as str first
-
-        # Build a lookup from original_name → mapping spec
-        mapping_by_name: dict[str, dict[str, Any]] = {
-            cm["original_name"]: cm for cm in self._binding.column_mappings
-        }
-
-        # Determine which key columns exist in key_config
-        key_cols: set[str] = set(self._binding.key_config.get("columns", []))
-
-        columns: list[ColumnMeta] = []
-        kept_series: dict[str, pd.Series] = {}  # type: ignore[type-arg]
-
-        for original_name, spec in mapping_by_name.items():
-            if not spec.get("include", True):
-                continue
-
-            if original_name not in raw_df.columns:
-                # Column declared in mappings but absent from file — skip
-                continue
-
-            data_type: str = spec.get("data_type", "text")
-            coerced = coerce_series(raw_df[original_name], data_type)
-            kept_series[original_name] = coerced
-
-            is_key = original_name in key_cols
-            columns.append(
-                ColumnMeta(
-                    original_name=original_name,
-                    display_name=spec.get("display_name", original_name),
-                    data_type=data_type,
-                    is_key=is_key,
-                    include=True,
-                )
-            )
-
-        result_df = pd.DataFrame(kept_series)
-        self._row_count = len(result_df)
-        return Population(df=result_df, columns=columns, source_id=self._binding.id)
+        pop = _apply_mappings(
+            raw_df, self._binding.column_mappings, self._binding.key_config, self._binding.id
+        )
+        self._row_count = pop.size
+        return pop
 
     def provenance(self) -> dict[str, Any]:
         """Return file path, SHA-256 digest of raw bytes, and row count.
@@ -158,12 +193,122 @@ class CsvSource(Source):
         If :meth:`load` has already been called the cached count is reused;
         otherwise the file is parsed once to obtain the count.
         """
-        raw_bytes = self._path.read_bytes()
-        sha256 = hashlib.sha256(raw_bytes).hexdigest()
+        sha256 = _hash_file(self._path)
 
         if self._row_count is None:
             # load() hasn't been called yet — parse minimally just to count rows.
             self._row_count = len(pd.read_csv(self._path, dtype=str))
+
+        return {
+            "path": str(self._path),
+            "sha256": sha256,
+            "row_count": self._row_count,
+        }
+
+
+# ---------------------------------------------------------------------------
+# ParquetSource
+# ---------------------------------------------------------------------------
+
+
+class ParquetSource(Source):
+    """Load a Parquet file and produce a coerced :class:`Population`.
+
+    Requires the ``[adapters]`` extra (``pyarrow``).
+
+    Parameters
+    ----------
+    binding:
+        The :class:`SourceBinding` that owns this adapter.
+    root:
+        Project root directory; ``binding.config["path"]`` is resolved
+        relative to this.
+    """
+
+    def __init__(self, binding: SourceBinding, root: Path) -> None:
+        self._binding = binding
+        self._root = root
+        self._path: Path = root / binding.config["path"]
+        self._row_count: int | None = None
+
+    def load(self) -> Population:
+        """Read the Parquet file, apply column mappings, and return a :class:`Population`."""
+        raw_df = pd.read_parquet(self._path)
+        pop = _apply_mappings(
+            raw_df, self._binding.column_mappings, self._binding.key_config, self._binding.id
+        )
+        self._row_count = pop.size
+        return pop
+
+    def provenance(self) -> dict[str, Any]:
+        """Return file path, SHA-256 digest of raw bytes, and row count.
+
+        ``sha256`` is the digest of the raw Parquet file bytes.  ``row_count``
+        is the number of data rows (len of loaded DataFrame), cached after the
+        first call to :meth:`load`.
+        """
+        sha256 = _hash_file(self._path)
+
+        if self._row_count is None:
+            self._row_count = len(pd.read_parquet(self._path))
+
+        return {
+            "path": str(self._path),
+            "sha256": sha256,
+            "row_count": self._row_count,
+        }
+
+
+# ---------------------------------------------------------------------------
+# XlsxSource
+# ---------------------------------------------------------------------------
+
+
+class XlsxSource(Source):
+    """Load an Excel (xlsx) file and produce a coerced :class:`Population`.
+
+    Requires the ``[adapters]`` extra (``openpyxl``).
+
+    Parameters
+    ----------
+    binding:
+        The :class:`SourceBinding` that owns this adapter.  An optional
+        ``binding.config["sheet"]`` selects the worksheet; when absent the
+        first sheet is used.
+    root:
+        Project root directory; ``binding.config["path"]`` is resolved
+        relative to this.
+    """
+
+    def __init__(self, binding: SourceBinding, root: Path) -> None:
+        self._binding = binding
+        self._root = root
+        self._path: Path = root / binding.config["path"]
+        self._sheet: str | int = binding.config.get("sheet", 0)
+        self._row_count: int | None = None
+
+    def load(self) -> Population:
+        """Read the xlsx file, apply column mappings, and return a :class:`Population`."""
+        raw_df = pd.read_excel(self._path, sheet_name=self._sheet, engine="openpyxl")
+        pop = _apply_mappings(
+            raw_df, self._binding.column_mappings, self._binding.key_config, self._binding.id
+        )
+        self._row_count = pop.size
+        return pop
+
+    def provenance(self) -> dict[str, Any]:
+        """Return file path, SHA-256 digest of raw bytes, and row count.
+
+        ``sha256`` is the digest of the raw xlsx file bytes.  ``row_count``
+        is the number of data rows (len of loaded DataFrame), cached after the
+        first call to :meth:`load`.
+        """
+        sha256 = _hash_file(self._path)
+
+        if self._row_count is None:
+            self._row_count = len(
+                pd.read_excel(self._path, sheet_name=self._sheet, engine="openpyxl")
+            )
 
         return {
             "path": str(self._path),
@@ -181,8 +326,8 @@ _SourceFactory = Callable[[SourceBinding, Path], Source]
 
 _FILE_FORMAT_MAP: dict[str, _SourceFactory] = {
     "csv": CsvSource,
-    # "parquet": ParquetSource,   # Phase 2 v2
-    # "xlsx": ExcelSource,        # Phase 2 v2
+    "parquet": ParquetSource,
+    "xlsx": XlsxSource,
 }
 
 _SUPPORTED_FORMATS = {"csv", "parquet", "xlsx"}
@@ -203,8 +348,7 @@ def source_for(binding: SourceBinding, root: Path) -> Source:
     ------
     UnsupportedSourceError
         If ``binding.type`` is not ``"file"``, or if ``binding.config["format"]``
-        is not in ``{csv, parquet, xlsx}``, or if the format is recognised but
-        has no implementation yet.
+        is not in ``{csv, parquet, xlsx}``.
     """
     if binding.type != "file":
         raise UnsupportedSourceError(
@@ -217,8 +361,5 @@ def source_for(binding: SourceBinding, root: Path) -> Source:
             f"File format {fmt!r} is not supported. Supported formats: {sorted(_SUPPORTED_FORMATS)}"
         )
 
-    cls = _FILE_FORMAT_MAP.get(fmt)
-    if cls is None:
-        raise UnsupportedSourceError(f"File format {fmt!r} is recognised but not yet implemented.")
-
+    cls = _FILE_FORMAT_MAP[fmt]
     return cls(binding, root)

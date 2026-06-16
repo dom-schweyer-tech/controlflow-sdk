@@ -211,24 +211,44 @@ class TestCsvSourceProvenance:
         """A quoted field containing an embedded newline must still count as ONE data row."""
         # Three data rows; the second has a quoted description field with a newline inside.
         csv_content = (
-            'entry_id,account,amount,posted_date\n'
-            'GL-001,1000,150.00,2024-01-15\n'
+            "entry_id,account,amount,posted_date\n"
+            "GL-001,1000,150.00,2024-01-15\n"
             '"GL-002","description\nwith newline",75.00,2024-01-16\n'
-            'GL-003,2000,300.00,2024-01-17\n'
+            "GL-003,2000,300.00,2024-01-17\n"
         )
         csv_file = tmp_path / "embedded.csv"
         csv_file.write_text(csv_content)
 
         # Minimal binding — only the columns present in this fixture.
         mappings = [
-            {"original_name": "entry_id", "display_name": "Entry ID", "data_type": "text",
-             "is_key": True, "include": True},
-            {"original_name": "account", "display_name": "Account", "data_type": "text",
-             "is_key": False, "include": True},
-            {"original_name": "amount", "display_name": "Amount", "data_type": "number",
-             "is_key": False, "include": True},
-            {"original_name": "posted_date", "display_name": "Posted Date", "data_type": "date",
-             "is_key": False, "include": True},
+            {
+                "original_name": "entry_id",
+                "display_name": "Entry ID",
+                "data_type": "text",
+                "is_key": True,
+                "include": True,
+            },
+            {
+                "original_name": "account",
+                "display_name": "Account",
+                "data_type": "text",
+                "is_key": False,
+                "include": True,
+            },
+            {
+                "original_name": "amount",
+                "display_name": "Amount",
+                "data_type": "number",
+                "is_key": False,
+                "include": True,
+            },
+            {
+                "original_name": "posted_date",
+                "display_name": "Posted Date",
+                "data_type": "date",
+                "is_key": False,
+                "include": True,
+            },
         ]
         binding = SourceBinding(
             id="embedded",
