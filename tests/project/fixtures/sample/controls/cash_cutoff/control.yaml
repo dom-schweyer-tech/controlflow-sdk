@@ -1,0 +1,13 @@
+id: cash_cutoff
+title: Cash Cutoff Control
+objective: Ensure cash transactions are recorded in the correct period.
+narrative: >
+  All cash receipts and disbursements are reviewed at period end to verify
+  they are recorded in the correct accounting period. Transactions within
+  3 business days of period close are scrutinised for correct date assignment.
+sources:
+  - id: gl
+framework_refs:
+  nist:
+    - AC-2
+test_path: test.py

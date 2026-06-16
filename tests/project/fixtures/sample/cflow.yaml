@@ -1,0 +1,7 @@
+name: Sample Audit Project
+framework: NIST SP 800-53
+system:
+  name: General Ledger System
+  description: Core financial reporting system
+defaults:
+  severity: medium

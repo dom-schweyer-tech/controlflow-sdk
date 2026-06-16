@@ -1,0 +1,23 @@
+sources:
+  - id: gl
+    type: file
+    config:
+      path: gl.csv
+      format: csv
+    key_config:
+      mode: single
+      columns:
+        - entry_id
+    column_mappings:
+      - original_name: entry_id
+        display_name: Entry ID
+        is_key: true
+        include: true
+      - original_name: amount
+        display_name: Amount
+        is_key: false
+        include: true
+      - original_name: posting_date
+        display_name: Posting Date
+        is_key: false
+        include: true
