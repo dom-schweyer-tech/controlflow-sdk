@@ -1,5 +1,6 @@
 """ControlFlow SDK project loader — public API."""
 
+from controlflow_sdk.project.discovery import Project, discover_controls, load_test_callable
 from controlflow_sdk.project.loader import (
     ProjectConfig,
     ProjectError,
@@ -8,8 +9,11 @@ from controlflow_sdk.project.loader import (
 )
 
 __all__ = [
+    "Project",
     "ProjectConfig",
     "ProjectError",
+    "discover_controls",
     "load_project_config",
     "load_sources",
+    "load_test_callable",
 ]
