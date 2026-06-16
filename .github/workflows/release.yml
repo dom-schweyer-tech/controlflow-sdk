@@ -79,16 +79,27 @@ jobs:
       url: https://pypi.org/project/controlflow-sdk/
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require an exact v* tag
+        run: |
+          git fetch --tags --force
+          git describe --exact-match --match 'v*' --tags HEAD || {
+            echo "::error::publish requires an exact v* tag on HEAD"; exit 1; }
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install build
-        run: pip install build
+      - name: Install build + twine
+        run: pip install --upgrade build twine
 
       - name: Rebuild wheel and sdist
         run: python -m build
+
+      - name: Verify distribution
+        run: twine check dist/*
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
