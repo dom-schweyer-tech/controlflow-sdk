@@ -39,18 +39,15 @@ def _parse_control(
 ) -> ControlDef:
     """Build a :class:`ControlDef` from a validated control document.
 
-    A private ``_test_file`` attribute (absolute :class:`~pathlib.Path`) is
-    attached to the returned instance so that :func:`load_test_callable` can
-    locate the script without needing the project root again.
-
     Args:
         doc:         Parsed YAML dict for the control.
         sources_map: All project sources keyed by id.
         control_dir: Directory that contains ``control.yaml`` (used to resolve
-                     ``test_path`` for later import).
+                     ``test_path`` to an absolute path).
 
     Returns:
-        A fully populated :class:`ControlDef` with ``_test_file`` set.
+        A fully populated :class:`ControlDef` whose ``test_path`` is an
+        absolute path string resolved relative to *control_dir*.
 
     Raises:
         ProjectError: If a source id referenced in ``sources:`` is not present
@@ -83,9 +80,11 @@ def _parse_control(
             inherent_rating=risk_raw.get("inherent_rating"),
         )
 
-    test_path: str = doc.get("test_path", "test.py")
+    # Resolve test_path to an absolute path at construction time so that
+    # load_test_callable can use it directly without needing the project root.
+    test_path: str = str((control_dir / doc.get("test_path", "test.py")).resolve())
 
-    control = ControlDef(
+    return ControlDef(
         id=doc["id"],
         title=doc["title"],
         objective=doc["objective"],
@@ -96,37 +95,41 @@ def _parse_control(
         test_path=test_path,
         severity_policy=dict(doc.get("severity_policy") or {}),
     )
-    # Attach the absolute test file path as a private attribute so that
-    # load_test_callable can find the script without the project root.
-    # We use setattr to avoid a mypy "unexpected attribute" error on the
-    # dataclass; the attribute is intentionally out-of-band.
-    setattr(control, "_test_file", control_dir / test_path)
-    return control
 
 
-def discover_controls(root: Path) -> list[ControlDef]:
+def discover_controls(
+    root: Path,
+    sources: dict[str, SourceBinding] | None = None,
+) -> list[ControlDef]:
     """Walk ``<root>/controls/*/control.yaml`` and return parsed controls.
 
     Each control is validated against the JSON schema, then its ``sources:``
-    entries are resolved against ``<root>/sources.yaml``.  The ``test_path``
-    field is stored as declared (relative to the control directory) for use by
-    :func:`load_test_callable`.
+    entries are resolved against the provided *sources* map (or
+    ``<root>/sources.yaml`` if *sources* is omitted).  The ``test_path``
+    field is stored as an absolute path resolved relative to each control's
+    directory.
 
     Args:
-        root: Path to the project root directory (must contain ``sources.yaml``
-              and a ``controls/`` subtree).
+        root:    Path to the project root directory (must contain a
+                 ``controls/`` subtree, and ``sources.yaml`` when *sources*
+                 is not provided).
+        sources: Optional pre-loaded sources map (keyed by source id).  When
+                 supplied, ``sources.yaml`` is **not** re-read — avoids a
+                 redundant disk read when the caller (e.g. :meth:`Project.load`)
+                 has already loaded sources.
 
     Returns:
         List of :class:`~controlflow_sdk.model.control.ControlDef` instances,
         one per discovered ``control.yaml``.
 
     Raises:
-        FileNotFoundError: If ``sources.yaml`` is missing.
+        FileNotFoundError: If ``sources.yaml`` is missing and *sources* is not
+                           provided.
         ProjectError:
             - If any ``control.yaml`` fails schema validation.
-            - If a control references a source id not defined in ``sources.yaml``.
+            - If a control references a source id not defined in the sources map.
     """
-    sources_map = load_sources(root)
+    sources_map = sources if sources is not None else load_sources(root)
     controls_root = root / "controls"
     results: list[ControlDef] = []
 
@@ -159,11 +162,8 @@ def load_test_callable(control: ControlDef) -> Callable[..., list[Any]]:
 
     Args:
         control: A :class:`~controlflow_sdk.model.control.ControlDef` whose
-                 ``test_path`` points to the script relative to the directory
-                 inferred from ``control.yaml``'s location.  The full absolute
-                 path is reconstructed from the control's id convention
-                 (``controls/<id>/test.py`` under the project root) using the
-                 path stored at import time.
+                 ``test_path`` holds the absolute path to the test script (as
+                 set by :func:`discover_controls` / :func:`_parse_control`).
 
     Returns:
         The ``test`` callable from the control's ``test.py``.
@@ -172,15 +172,7 @@ def load_test_callable(control: ControlDef) -> Callable[..., list[Any]]:
         ProjectError: If ``test.py`` is missing, if ``test`` is not defined in
                       it, or if ``test`` is not callable.
     """
-    # Resolve the test file path.  ``control._test_file`` is set by
-    # discover_controls; fall back to reconstructing from test_path if this
-    # control was built manually.
-    test_file: Path | None = getattr(control, "_test_file", None)
-    if test_file is None:
-        raise ProjectError(
-            f"Control '{control.id}' has no _test_file path. "
-            "Use discover_controls() to load controls."
-        )
+    test_file = Path(control.test_path)
 
     if not test_file.exists():
         raise ProjectError(f"Control '{control.id}': test file not found at {test_file}")
@@ -236,5 +228,5 @@ class Project:
         """
         config = load_project_config(root)
         sources = load_sources(root)
-        controls = discover_controls(root)
+        controls = discover_controls(root, sources=sources)
         return cls(config=config, sources=sources, controls=controls)

@@ -43,7 +43,11 @@ class TestDiscoverControls:
 
     def test_test_path_attached(self):
         controls = discover_controls(SAMPLE)
-        assert controls[0].test_path == "test.py"
+        # test_path is resolved to an absolute path at construction time
+        p = Path(controls[0].test_path)
+        assert p.is_absolute()
+        assert p.name == "test.py"
+        assert p.exists()
 
     def test_unknown_source_raises_project_error(self, tmp_path):
         """A control.yaml referencing an unknown source id raises ProjectError."""
