@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://controlflow.dev/schemas/sources/1.0",
+  "title": "ControlFlow Sources Definition",
+  "description": "Schema for a sources document containing full data-source definitions.",
+  "type": "object",
+  "required": ["sources"],
+  "properties": {
+    "sources": {
+      "type": "array",
+      "description": "Full data source definitions for import into ControlFlow.",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "config", "key_config", "column_mappings"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique source identifier matching references in control docs."
+          },
+          "type": {
+            "type": "string",
+            "description": "Source type (e.g. file, s3, snowflake, rest).",
+            "enum": ["file", "s3", "snowflake", "rest", "api"]
+          },
+          "config": {
+            "type": "object",
+            "description": "Connection / location configuration for this source type."
+          },
+          "key_config": {
+            "type": "object",
+            "description": "Row key derivation config (mode + optional columns).",
+            "required": ["mode"],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": ["auto", "single", "composite"]
+              },
+              "columns": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "column_mappings": {
+            "type": "array",
+            "description": "Column display/key mapping configuration.",
+            "items": {
+              "type": "object",
+              "required": ["original_name", "display_name"],
+              "properties": {
+                "original_name": { "type": "string" },
+                "display_name": { "type": "string" },
+                "is_key": { "type": "boolean" },
+                "include": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

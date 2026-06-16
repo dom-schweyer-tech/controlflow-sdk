@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://controlflow.dev/schemas/bundle/1.0",
+  "title": "ControlFlow Bundle",
+  "description": "STUB — finalized in Phase 3 (Task 8). Validates the top-level bundle envelope only.",
+  "type": "object",
+  "required": ["schema_version", "controls"]
+}
