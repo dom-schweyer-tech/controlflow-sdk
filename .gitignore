@@ -6,3 +6,5 @@ target/
 dist/
 *.egg-info/
 .venv/
+import-bundle.zip
+*.zip

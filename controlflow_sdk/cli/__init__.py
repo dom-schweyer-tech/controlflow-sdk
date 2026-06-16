@@ -15,6 +15,10 @@ validate [dir]
 run [dir] [--control <id>] [--at <iso8601>]
     Execute all controls (or one) and write workpaper + evidence outputs.
     Exits 0 if all controls completed, 1 if any errored.
+
+build [dir] [--out import-bundle.zip] [--at <iso8601>]
+    Read the run log, assemble a validated manifest, and write a zip bundle.
+    Exits 0 on success, 1 if no runs exist or the manifest is invalid.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from controlflow_sdk.cli.build_cmd import build_cmd
 from controlflow_sdk.cli.run_cmd import run_cmd
 from controlflow_sdk.cli.scaffold import scaffold_control, scaffold_project
 from controlflow_sdk.project import ProjectError, load_sources
@@ -173,6 +178,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Execution timestamp in ISO-8601 format (default: current UTC time).",
     )
 
+    # -- build ---------------------------------------------------------------
+    build_p = sub.add_parser(
+        "build",
+        help="Assemble a versioned import-bundle zip from the run log.",
+    )
+    build_p.add_argument(
+        "dir",
+        nargs="?",
+        default=".",
+        help="Project root directory (default: current directory).",
+    )
+    build_p.add_argument(
+        "--out",
+        default=None,
+        metavar="<path>",
+        help="Output zip path (default: <project-dir>/import-bundle.zip).",
+    )
+    build_p.add_argument(
+        "--at",
+        default=None,
+        metavar="<iso8601>",
+        help="Bundle timestamp in ISO-8601 format (default: current UTC time).",
+    )
+
     return parser
 
 
@@ -205,6 +234,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.at is None:
             args.at = datetime.now(UTC).isoformat()
         return run_cmd(args)
+
+    if args.command == "build":
+        # Clock boundary: inject current UTC time only when --at is not supplied.
+        if args.at is None:
+            args.at = datetime.now(UTC).isoformat()
+        return build_cmd(args)
 
     parser.print_help()
     return 2
