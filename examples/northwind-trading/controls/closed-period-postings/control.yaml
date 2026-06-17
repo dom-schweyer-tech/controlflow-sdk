@@ -1,0 +1,27 @@
+id: closed-period-postings
+title: Closed Accounting Period Posting Detection
+objective: >
+  Detect journal entries that were posted to accounting periods that have
+  already been formally closed, ensuring period-end cut-off integrity and
+  preventing unauthorized late adjustments to locked books.
+narrative: >
+  At each period close the Accounting Manager marks the period as 'closed'
+  in the period master table, locking it against further postings. This
+  control joins every journal entry to the closed-period master and flags
+  any entry whose period carries a status of 'closed'. Such entries represent
+  either a system configuration gap (the ERP allowed a posting to a locked
+  period) or a manual override that bypassed standard access controls.
+  Flagged entries are reviewed by the Controller and must be supported by
+  written authorization from the CFO before they are accepted or reversed.
+framework_refs:
+  nist: []
+risk:
+  name: Unauthorized Late Adjustment to Closed Period
+  description: >
+    Postings to closed accounting periods circumvent period-end cut-off
+    controls and may allow retroactive manipulation of previously reported
+    financial results, increasing the risk of material misstatement.
+  inherent_rating: high
+sources:
+  - id: journal_entries
+  - id: closed_periods

@@ -1,0 +1,30 @@
+id: three-way-match
+title: Accounts Payable Three-Way Match
+objective: >
+  Verify that every outgoing payment can be matched to a valid approved
+  purchase order and a corresponding vendor invoice, and that the payment
+  amount does not deviate from the purchase order amount by more than 1%,
+  preventing disbursements for goods or services that were not properly
+  authorized.
+narrative: >
+  Before any payment is released the AP team performs a three-way match:
+  (1) the payment references a valid invoice in the invoice register,
+  (2) that invoice references a purchase order that exists and carries
+  'approved' status, and (3) the payment amount is within 1% of the
+  approved PO amount (to allow for minor freight or currency rounding).
+  Payments that fail any of these checks are placed on hold and routed to
+  the Procurement Manager and CFO for resolution. This control runs
+  against the full payment population at each period close.
+framework_refs:
+  nist: []
+risk:
+  name: Payment Without Valid Authorization
+  description: >
+    Disbursements issued against missing, unapproved, or mismatched purchase
+    orders expose the organization to financial loss through fraud, duplicate
+    payments, or payments for goods and services never properly authorized.
+  inherent_rating: high
+sources:
+  - id: payments
+  - id: invoices
+  - id: purchase_orders

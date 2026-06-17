@@ -1,0 +1,27 @@
+id: manual-je-review
+title: Manual Journal Entry Review (Segregation of Duties)
+objective: >
+  Ensure that high-value manual journal entries are reviewed and approved by
+  an individual other than the preparer, preventing self-authorization and
+  unsupported postings that could mask fraud or error.
+narrative: >
+  The Controller's office requires independent review for all manually prepared
+  journal entries with an absolute value of $50,000 or greater. For each such
+  entry the 'reviewed_by' field must be populated with a valid employee ID that
+  differs from the 'prepared_by' employee. Entries that are self-reviewed
+  (reviewed_by == prepared_by) or lack any reviewer are escalated to the
+  Internal Audit team for investigation and supporting documentation.
+  This control is performed on a continuous basis; results are evaluated at
+  each period-end close cycle.
+framework_refs:
+  nist:
+    - AC-5
+risk:
+  name: Unsupported or Self-Authorized Journal Entry
+  description: >
+    A preparer with the ability to both create and approve their own journal
+    entries could record fictitious or erroneous amounts without independent
+    oversight, increasing the risk of financial misstatement or fraud.
+  inherent_rating: high
+sources:
+  - id: journal_entries
