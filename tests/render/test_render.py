@@ -109,6 +109,41 @@ class TestRenderMarkdown:
         assert "zero exceptions tolerated" in md
         assert "did not operate effectively" in md
 
+    def test_section_headers_title_cased(self, workpaper: Workpaper) -> None:
+        md = render_markdown(workpaper)
+        assert "## Objective & Scope" in md
+        assert "## Data Sources" in md
+        assert "### Framework References" in md
+        # Old lowercase forms are gone.
+        assert "## Objective & scope" not in md
+        assert "## Data sources" not in md
+
+    def test_data_source_default_completeness_accuracy(self, workpaper: Workpaper) -> None:
+        """Each data source shows a Completeness & Accuracy line (default derived)."""
+        md = render_markdown(workpaper)
+        assert "**Completeness & Accuracy:**" in md
+        assert "tested in full" in md
+        assert "no sampling" in md
+
+    def test_data_source_authored_description_and_ca(self, workpaper: Workpaper) -> None:
+        from controlflow_sdk.model.workpaper import DataSample
+
+        # The fixture's procedure already records provenance for source_id "src-1";
+        # attach a render-only sample carrying authored prose for that same source.
+        sample = DataSample(
+            source_id="src-1",
+            path="/data/invoices.csv",
+            columns=["Invoice", "Amount"],
+            rows=[["INV-001", "1500"]],
+            total_rows=1,
+            description="Vendor invoice register for the period.",
+            completeness_accuracy="Reconciled to the AP subledger control account.",
+        )
+        workpaper.data_samples = [sample]
+        md = render_markdown(workpaper)
+        assert "**Description:** Vendor invoice register for the period." in md
+        assert "**Completeness & Accuracy:** Reconciled to the AP subledger control account." in md
+
     def test_evaluation_section_removed(self, workpaper: Workpaper) -> None:
         md = render_markdown(workpaper)
         assert "## Evaluation" not in md
@@ -116,7 +151,7 @@ class TestRenderMarkdown:
     def test_results_table_has_no_failed_row(self, workpaper: Workpaper) -> None:
         md = render_markdown(workpaper)
         results = md[md.index("## Results") : md.index("## Objective")]
-        assert "| Records tested |" in results
+        assert "| Records Tested |" in results
         assert "| Passed |" in results
         assert "| Exceptions |" in results
         assert "| Failed |" not in results
