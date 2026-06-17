@@ -9,7 +9,6 @@ abstraction that ``source_for(...).load()`` returns.
 from __future__ import annotations
 
 import traceback
-import types
 from pathlib import Path
 from typing import Any
 
@@ -23,14 +22,6 @@ from controlflow_sdk.project.discovery import load_test_callable
 
 class RunnerError(Exception):
     """Wraps author-code failures with the control id and an original traceback summary."""
-
-
-def _is_sdk_internal_frame(frame: types.FrameType | None) -> bool:
-    """Return True if the frame belongs to SDK internals or installed packages."""
-    if frame is None:
-        return False
-    filename = frame.f_code.co_filename
-    return "controlflow_sdk" in filename or "site-packages" in filename
 
 
 def _clean_traceback_summary(exc: BaseException) -> str:
