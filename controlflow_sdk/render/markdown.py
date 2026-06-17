@@ -95,6 +95,11 @@ def render_markdown(wp: Workpaper) -> str:
         lines.append(f"| Failed | {_md_cell(run.failed)} |")
         lines.append(f"| Pass Rate | {_md_cell(run.pass_rate)}% |")
         lines.append("")
+        lines.append(
+            f"> **Full population tested: {run.population_size} record(s)."
+            " No sampling was applied.**"
+        )
+        lines.append("")
 
         # Violations table
         if run.violations:

@@ -94,6 +94,13 @@ class TestRenderMarkdown:
         assert "AC-2" in md
         assert "AU-6" in md
 
+    def test_full_population_no_sampling_statement(self, workpaper: Workpaper) -> None:
+        """Each procedure's results section must assert full-population coverage."""
+        md = render_markdown(workpaper)
+        assert "No sampling was applied" in md
+        # The population size (100) must appear in the statement
+        assert "100 record(s)" in md
+
     def test_contains_test_code_fenced_block(self, workpaper: Workpaper) -> None:
         md = render_markdown(workpaper)
         assert "```" in md
@@ -229,3 +236,9 @@ class TestRenderHtml:
         html = render_html(workpaper)
         assert "AC-2" in html
         assert "AU-6" in html
+
+    def test_full_population_no_sampling_statement(self, workpaper: Workpaper) -> None:
+        """Each procedure's results section must assert full-population coverage."""
+        html = render_html(workpaper)
+        assert "No sampling was applied" in html
+        assert "100 record(s)" in html

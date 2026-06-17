@@ -194,6 +194,10 @@ def render_html(wp: Workpaper) -> str:
         emit(f"<tr><td>Failed</td><td>{_e(run.failed)}</td></tr>")
         emit(f"<tr><td>Pass Rate</td><td>{_e(run.pass_rate)}%</td></tr>")
         emit("</tbody></table>")
+        emit(
+            f"<p><strong>Full population tested: {_e(run.population_size)} record(s)."
+            " No sampling was applied.</strong></p>"
+        )
 
         # Violations table
         if run.violations:
