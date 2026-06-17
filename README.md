@@ -20,7 +20,63 @@ For development, include test dependencies:
 pip install -e ".[dev]"
 ```
 
-## Quick Start
+## See it in action — the Northwind demo
+
+The repo ships a complete, runnable engagement under
+[`examples/northwind-trading/`](examples/northwind-trading/) — a fictional wholesale distributor with
+**8 real audit controls** spanning financial close, IT access, and procurement, over 8 seeded data
+extracts. Run it to watch the SDK turn raw CSVs into audit-grade, full-population workpapers in
+seconds — no authoring required:
+
+```bash
+git clone https://github.com/dom-schweyer-tech/controlflow-sdk
+cd controlflow-sdk
+pip install -e ".[adapters]"            # the library + Parquet/Excel support
+
+# run all 8 controls over their FULL populations (the fixed --at keeps results deterministic)
+cflow run examples/northwind-trading --at 2026-03-31T00:00:00Z
+```
+
+```text
+  RUN  manual-je-review          3 violation(s) / 40 records   92.5%
+  RUN  closed-period-postings    2 violation(s) / 40 records   95.0%
+  RUN  three-way-match           4 violation(s) / 30 records   86.67%
+  RUN  terminated-access         3 violation(s) / 38 records   92.11%
+  RUN  privileged-access-review  2 violation(s) / 38 records   94.74%
+  RUN  mfa-enforcement           0 violation(s) / 38 records   100.0%   ← a clean, passing control
+  RUN  duplicate-payments        2 violation(s) / 30 records   93.33%
+  RUN  vendor-master-sod         2 violation(s) / 30 records   93.33%
+```
+
+Every control wrote a workpaper. Open one — `three-way-match` joins **three** sources
+(payments ↔ invoices ↔ purchase orders):
+
+```bash
+open examples/northwind-trading/target/workpapers/three-way-match.html
+```
+
+It shows the control's objective and narrative, an explicit **"full population tested — no sampling
+applied"** statement, source provenance (SHA-256 + row counts), the test code that ran, and a table
+of every exception with a plain-English reason
+(e.g. *"Payment references invoice 'INV-099' which does not exist in the invoice register"*).
+
+Then package the engagement for the ControlFlow app:
+
+```bash
+cflow build examples/northwind-trading --out bundle.zip --at 2026-03-31T00:00:00Z
+#   BUNDLE  bundle.zip  8 controls / 8 runs
+```
+
+Upload `bundle.zip` in the app at **Settings → Imports** (admin) and the 8 controls, their
+workpapers, and all **18 exceptions** land in your tenant — with the NIST 800-53 references carried
+through.
+
+The example doubles as a **template**: copy the directory, swap in your own data and controls, and
+you have a real starting point. See its
+[catalog README](examples/northwind-trading/README.md) for what each control does — or author your
+own from scratch below.
+
+## Quick Start — author your own control
 
 ### 1. Initialize a project
 
