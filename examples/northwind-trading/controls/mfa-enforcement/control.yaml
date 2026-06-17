@@ -1,0 +1,26 @@
+id: mfa-enforcement
+title: Multi-Factor Authentication Enforcement
+objective: >
+  Ensure that all active system accounts have multi-factor authentication (MFA)
+  enabled, preventing unauthorized access through compromised credentials alone.
+narrative: >
+  Organizational policy mandates MFA for every active user account across all
+  in-scope systems. IT Security audits the access account population and flags
+  any active account where MFA has not been configured or has been disabled.
+  Flagged accounts are placed on a 48-hour remediation notice; accounts not
+  remediated within the window are suspended pending an access review. This
+  control is expected to pass clean in the current population — all active
+  accounts have MFA enabled.
+framework_refs:
+  nist:
+    - IA-2
+risk:
+  name: Active Account Without MFA
+  description: >
+    An active account without multi-factor authentication is vulnerable to
+    credential-based attacks (phishing, password spray, credential stuffing).
+    Compromise of such an account grants an attacker unimpeded access to
+    organizational systems without any second-factor barrier.
+  inherent_rating: high
+sources:
+  - id: access_accounts

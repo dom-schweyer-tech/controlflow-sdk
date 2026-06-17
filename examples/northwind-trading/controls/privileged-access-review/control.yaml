@@ -1,0 +1,28 @@
+id: privileged-access-review
+title: Privileged Access Periodic Review
+objective: >
+  Ensure that all privileged system accounts are reviewed and re-approved on at
+  least a quarterly basis, with every privileged account having a recorded
+  approver and a review date within the last 90 days.
+narrative: >
+  Privileged accounts (those with elevated system rights such as administrator,
+  DBA, or system owner roles) must be reviewed and re-approved each quarter by
+  an authorized IT manager. For each privileged account, the 'approved_by'
+  field must contain a valid approver ID and the 'last_review_date' must fall
+  within 90 days of the control population date (fixed demo as-of date:
+  2026-03-31; cutoff = 2025-12-31). Accounts without a recorded approver or
+  with a stale review date are flagged and routed to the IT Director for
+  immediate re-certification or revocation.
+framework_refs:
+  nist:
+    - AC-6
+risk:
+  name: Unreviewed Privileged Account
+  description: >
+    Privileged accounts that are not periodically reviewed and re-certified may
+    accumulate excessive rights over time or remain active after an employee's
+    role changes, increasing the risk of unauthorized system access and
+    privilege abuse.
+  inherent_rating: high
+sources:
+  - id: access_accounts

@@ -1,0 +1,26 @@
+id: terminated-access
+title: Terminated Employee Access Revocation
+objective: >
+  Ensure that system access accounts belonging to terminated employees are
+  promptly disabled, preventing former staff from accessing organizational
+  systems after their employment has ended.
+narrative: >
+  HR notifies IT on the same day an employee is terminated. IT is required to
+  disable all active system accounts within 24 hours of the termination notice.
+  This control cross-references the active employee roster against the access
+  account population and flags any account that remains active for an employee
+  whose HR record shows a terminated status. Exceptions are escalated to the
+  IT Security team and CISO for immediate remediation and root-cause analysis.
+framework_refs:
+  nist:
+    - AC-2
+risk:
+  name: Unauthorized Access by Terminated Employee
+  description: >
+    Active accounts retained after employment ends allow former employees to
+    access sensitive data, modify records, or exfiltrate information without
+    authorization, representing a significant insider-threat and compliance risk.
+  inherent_rating: critical
+sources:
+  - id: access_accounts
+  - id: employees
