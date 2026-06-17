@@ -198,7 +198,7 @@ class TestRenderHtmlAppParity:
     def test_results_tile_order_no_failed(self, failing_workpaper: Workpaper) -> None:
         html = render_html(failing_workpaper)
         labels = re.findall(r'tile-label">([^<]+)', html)
-        assert labels == ["Records tested", "Passed", "Exceptions"]
+        assert labels == ["Records Tested", "Passed", "Exceptions"]
         assert "Failed" not in labels
 
     def test_resultbar_has_no_fail_metric(self, failing_workpaper: Workpaper) -> None:
@@ -345,3 +345,77 @@ class TestRenderHtmlAppParity:
         html = render_html(failing_workpaper)
         assert "<b>" not in html
         assert "&lt;b&gt;" in html
+
+    # ── 11. sticky result bar carries the control id + name ────────────────────
+
+    def test_resultbar_shows_control_id_and_name(self, failing_workpaper: Workpaper) -> None:
+        html = render_html(failing_workpaper)
+        bar = html[html.index('<div class="wp-resultbar">') :]
+        bar = bar[: bar.index('<span class="rb-verdict"')]
+        # The control id (mono) and title (primary) lead the sticky bar.
+        assert "ctrl-001:" in bar
+        assert "Invoice Amount Control" in bar
+        assert 'class="rb-cid' in bar
+        assert 'class="rb-cname"' in bar
+
+    # ── 12. section headings carry NO internal metadata sec-tag ────────────────
+
+    def test_no_sec_tag_in_headings(self, failing_workpaper: Workpaper) -> None:
+        html = render_html(failing_workpaper)
+        assert "sec-tag" not in html
+        # The internal tag strings must not leak into the document.
+        for tag in ("read-only · run_record", "control · framework_refs", "provenance · data"):
+            assert tag not in html
+
+    def test_section_labels_title_cased(self, failing_workpaper: Workpaper) -> None:
+        html = render_html(failing_workpaper)
+        labels = re.findall(r"<h2>([^<]+)</h2>", html)
+        assert labels == [
+            "Results",
+            "Objective &amp; Scope",
+            "Control",
+            "Data Sources",
+            "Procedures",
+            "Exceptions",
+            "Conclusion",
+        ]
+
+    # ── 13. exceptions section: cards only, no summary table ───────────────────
+
+    def test_exceptions_has_cards_but_no_summary_table(self, failing_workpaper: Workpaper) -> None:
+        html = render_html(failing_workpaper)
+        block = _exceptions_block(html)
+        # Per-exception collapsible cards remain (one <details> per violation).
+        assert block.count("<details>") == 2
+        assert "INV-001" in block
+        assert "INV-002" in block
+        # The E-1/E-2 summary table is gone — no E-ref column header.
+        assert "E-ref" not in block
+        assert "<thead>" not in block
+
+    # ── 14. data sources show a Completeness & Accuracy assertion ──────────────
+
+    def test_data_source_shows_completeness_accuracy(
+        self, workpaper_with_small_sample: Workpaper
+    ) -> None:
+        html = render_html(workpaper_with_small_sample)
+        assert "Completeness &amp; Accuracy" in html
+        # Default assertion derived from the tie-out (row count + file + no sampling).
+        assert "tested in full" in html
+        assert "no sampling" in html
+
+    def test_data_source_uses_authored_completeness_accuracy(self) -> None:
+        sample = DataSample(
+            source_id="src-1",
+            path="/data/invoices.csv",
+            columns=["Invoice", "Amount"],
+            rows=[["INV-001", "1500"]],
+            total_rows=1,
+            description="Vendor invoice register for the period.",
+            completeness_accuracy="Reconciled to the AP subledger control account.",
+        )
+        wp = _make_workpaper([], data_samples=[sample])
+        html = render_html(wp)
+        assert "Description" in html
+        assert "Vendor invoice register for the period." in html
+        assert "Reconciled to the AP subledger control account." in html
