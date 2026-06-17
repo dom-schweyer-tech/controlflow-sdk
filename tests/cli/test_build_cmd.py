@@ -105,8 +105,8 @@ class TestBuildNoRunLog:
         main(["build", str(proj), "--out", str(out_zip), "--at", FIXED_BUILD_AT])
         combined = capsys.readouterr()
         output = combined.out + combined.err
-        # The message must guide the user to run first
-        assert "run" in output.lower()
+        # The message must acknowledge a run may have failed, not just be absent
+        assert "completed without errors" in output.lower() or "errors" in output.lower()
 
     def test_empty_run_log_exits_1(self, tmp_path: Path) -> None:
         """build exits 1 when run-log.json exists but is empty (zero runs)."""

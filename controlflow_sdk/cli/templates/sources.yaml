@@ -1,1 +1,62 @@
+# sources.yaml — declare the data files your controls test against.
+# Each source gets a unique `id` that controls reference by name.
+#
+# Example A: single-key CSV source
+# ---------------------------------
+# sources:
+#   - id: invoices
+#     type: file
+#     config:
+#       path: data/invoices.csv
+#       format: csv          # csv | parquet | excel
+#     key_config:
+#       type: single         # single: one column uniquely identifies each row
+#       columns:
+#         - invoice_id       # original_name of the key column
+#     column_mappings:
+#       - original_name: invoice_id
+#         display_name: Invoice ID
+#         data_type: text    # text | number | date | boolean
+#         is_key: true
+#       - original_name: amount
+#         display_name: Amount
+#         data_type: number
+#         is_key: false
+#       - original_name: approved_by
+#         display_name: Approved By
+#         data_type: text
+#         is_key: false
+#
+# Example B: composite-key source
+# --------------------------------
+# When no single column uniquely identifies a row, list multiple columns.
+# IMPORTANT: the composite key is NOT auto-concatenated by the SDK.
+# Your test() function is responsible for constructing item_key itself, e.g.:
+#   item_key = f"{row['vendor_id']}|{row['invoice_id']}"
+#
+# sources:
+#   - id: line_items
+#     type: file
+#     config:
+#       path: data/line_items.csv
+#       format: csv
+#     key_config:
+#       type: composite      # composite: combination of columns is the key
+#       columns:
+#         - vendor_id
+#         - invoice_id
+#     column_mappings:
+#       - original_name: vendor_id
+#         display_name: Vendor ID
+#         data_type: text
+#         is_key: true
+#       - original_name: invoice_id
+#         display_name: Invoice ID
+#         data_type: text
+#         is_key: true
+#       - original_name: amount
+#         display_name: Amount
+#         data_type: number
+#         is_key: false
+
 sources: []

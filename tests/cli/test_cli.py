@@ -204,3 +204,11 @@ class TestNew:
         rc = main(["new", "control", "vendor_payments", "--dir", str(proj)])
         assert rc == 0
         assert "Modified" in cy.read_text()
+
+    def test_new_control_positional_dir(self, tmp_path: Path) -> None:
+        """cflow new control <slug> <dir> (positional dir) creates controls/<slug> in <dir>."""
+        proj = tmp_path / "proj"
+        main(["init", str(proj)])
+        rc = main(["new", "control", "inv_cutoff", str(proj)])
+        assert rc == 0
+        assert (proj / "controls" / "inv_cutoff" / "control.yaml").exists()

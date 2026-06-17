@@ -84,6 +84,18 @@ U003,false,true
 cflow new control ctl-001
 ```
 
+Or pass the project directory as a positional argument (same as `cflow init`):
+
+```bash
+cflow new control ctl-001 my-audit
+```
+
+Both forms are equivalent; `--dir` is also accepted for scripts that prefer explicit flags:
+
+```bash
+cflow new control ctl-001 --dir my-audit
+```
+
 This creates `controls/ctl-001/control.yaml` and `controls/ctl-001/test.py`.
 
 Edit `controls/ctl-001/control.yaml` to describe the control and bind it to sources:
@@ -210,7 +222,7 @@ cflow build --out exports/my-bundle.zip
 ## Features
 
 - `cflow init <dir>` — scaffold a new project
-- `cflow new control <slug>` — scaffold a new control
+- `cflow new control <slug> [dir]` — scaffold a new control (positional dir, or `--dir`)
 - `cflow validate [dir]` — validate all controls against `sources.yaml`
 - `cflow run [dir]` — execute tests, write workpapers and evidence
 - `cflow build [dir]` — package runs into an importable zip bundle
@@ -262,6 +274,28 @@ from controlflow_sdk import ColumnMeta
 | `number`    | `float64`   | Non-numeric values become `NaN` |
 | `date`      | `datetime64`| Non-parseable values become `NaT` |
 | `boolean`   | `bool`      | Recognises `true/false`, `1/0`, `yes/no` |
+
+### Key configuration in `sources.yaml`
+
+`key_config.type` controls how each row is uniquely identified:
+
+- **`single`** — one column is the key (e.g. `invoice_id`). The SDK uses that column's value directly as `item_key` when recording violations.
+- **`composite`** — two or more columns together identify a row. The SDK does **not** auto-concatenate them. Your `test()` function is responsible for constructing `item_key` from the relevant columns:
+
+  ```python
+  def test(pop):
+      violations = []
+      for _, row in pop.df.iterrows():
+          item_key = f"{row['vendor_id']}|{row['invoice_id']}"
+          if row["amount"] > 10000 and not row["approved"]:
+              violations.append({
+                  "item_key": item_key,
+                  "description": "Large unapproved transaction",
+              })
+      return violations
+  ```
+
+The `sources.yaml` template created by `cflow init` includes commented-out examples for both modes.
 
 ## License
 

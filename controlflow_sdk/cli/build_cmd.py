@@ -55,7 +55,8 @@ def build_cmd(args: argparse.Namespace) -> int:
 
     if not runs:
         print(
-            "ERROR: No runs found. Run `cflow run` before `cflow build`.",
+            "ERROR: No runs found in target/run-log.json — run `cflow run` first, "
+            "and make sure it completed without errors.",
             file=sys.stderr,
         )
         return 1

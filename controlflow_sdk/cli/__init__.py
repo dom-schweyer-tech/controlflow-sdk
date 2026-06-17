@@ -5,8 +5,9 @@ Subcommands
 init <dir>
     Scaffold a new cflow project.
 
-new control <slug> [--dir <dir>]
+new control <slug> [dir] [--dir <dir>]
     Scaffold a new control under the given project directory.
+    The directory may be supplied as a positional argument or via --dir.
 
 validate [dir]
     Load the project, validate all controls, and report results.
@@ -48,13 +49,15 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
-    """Handle ``cflow new control <slug> [--dir <dir>]``."""
+    """Handle ``cflow new control <slug> [dir] [--dir <dir>]``."""
     if args.resource != "control":
         print(f"Unknown resource type: '{args.resource}'", file=sys.stderr)
         print("Usage: cflow new control <slug>", file=sys.stderr)
         return 2
 
-    root = Path(args.dir).resolve()
+    # Resolve directory: positional arg takes priority, then --dir flag, then cwd.
+    raw_dir = args.dir or args.dir_flag or "."
+    root = Path(raw_dir).resolve()
     scaffold_control(root, args.slug)
     print(f"Created control '{args.slug}' in {root / 'controls' / args.slug}")
     return 0
@@ -140,8 +143,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     new_p.add_argument("slug", help="Slug identifier for the new resource.")
     new_p.add_argument(
+        "dir",
+        nargs="?",
+        default=None,
+        help="Project root directory (positional, optional).",
+    )
+    new_p.add_argument(
         "--dir",
-        default=".",
+        dest="dir_flag",
+        default=None,
+        metavar="<dir>",
         help="Project root directory (default: current directory).",
     )
 
