@@ -5,6 +5,8 @@ import json
 import sqlite3
 from typing import Any
 
+from controlflow_sdk.model.run import RunRecord
+
 
 def _loads(value: str | None, fallback: Any) -> Any:
     return json.loads(value) if value else fallback
@@ -172,3 +174,68 @@ def list_controls(conn: sqlite3.Connection) -> list[dict]:
         if ctrl is not None:
             controls.append(ctrl)
     return controls
+
+
+# ---- runs + violations -----------------------------------------------------
+def insert_run(conn: sqlite3.Connection, run: RunRecord) -> None:
+    conn.execute(
+        """INSERT OR REPLACE INTO runs
+             (run_id, control_id, executed_at, population_size,
+              total, passed, failed, pass_rate, provenance, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (run.run_id, run.control_id, run.executed_at, run.population_size,
+         run.population_size, run.passed, run.failed, run.pass_rate,
+         json.dumps([p.to_dict() for p in run.provenance]), run.executed_at),
+    )
+    conn.execute("DELETE FROM violations WHERE run_id = ?", (run.run_id,))
+    conn.executemany(
+        """INSERT INTO violations (run_id, item_key, description, severity, details)
+           VALUES (?, ?, ?, ?, ?)""",
+        [(run.run_id, v.item_key, v.description, str(v.severity), json.dumps(v.details))
+         for v in run.violations],
+    )
+    conn.commit()
+
+
+def _violations_for(conn: sqlite3.Connection, run_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT item_key, description, severity, details FROM violations "
+        "WHERE run_id = ? ORDER BY id", (run_id,)
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["details"] = _loads(d.get("details"), {})
+        out.append(d)
+    return out
+
+
+def get_run(conn: sqlite3.Connection, run_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["provenance"] = _loads(d.get("provenance"), [])
+    d["violations"] = _violations_for(conn, run_id)
+    return d
+
+
+def list_runs_for(conn: sqlite3.Connection, control_id: str) -> list[dict]:
+    ids = [
+        r["run_id"]
+        for r in conn.execute(
+            "SELECT run_id FROM runs WHERE control_id = ? "
+            "ORDER BY executed_at DESC, created_at DESC", (control_id,)
+        ).fetchall()
+    ]
+    result = []
+    for rid in ids:
+        run = get_run(conn, rid)
+        if run is not None:
+            result.append(run)
+    return result
+
+
+def latest_run(conn: sqlite3.Connection, control_id: str) -> dict | None:
+    runs = list_runs_for(conn, control_id)
+    return runs[0] if runs else None
