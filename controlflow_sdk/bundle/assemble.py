@@ -122,7 +122,14 @@ def _build_control_block(
     Reads ``test_code`` from the file at ``control.test_path`` (content only —
     the path itself is never included in the output).
     """
-    test_code = pathlib.Path(control.test_path).read_text(encoding="utf-8")
+    # For store-loaded controls, test_code is already inlined; fall back to
+    # reading the file only when test_path is a non-empty path string.
+    if control.test_code is not None:
+        test_code = control.test_code
+    elif control.test_path:
+        test_code = pathlib.Path(control.test_path).read_text(encoding="utf-8")
+    else:
+        test_code = ""
 
     block: dict[str, Any] = {
         "framework_refs": _serialise_framework_refs(control),
