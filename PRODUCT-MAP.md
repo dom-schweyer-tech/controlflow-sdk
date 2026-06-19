@@ -6,8 +6,9 @@
 
 | Surface | Type | What it does |
 | --- | --- | --- |
-| `controlplane` | command / web app | Launches the local SQLite-backed FastAPI + HTMX control plane (localhost only, default `:8765`); the primary authoring surface. `pip install 'controlflow-sdk[plane]'` → `controlplane --project <dir>`. |
-| Control plane — Dashboard | view | Lists controls + last-run status; entry point to author, run, and export. |
+| `controlplane` | command / web app | Launches the local SQLite-backed FastAPI + HTMX control plane (localhost only, default `:8765`); the primary authoring surface. `pip install 'controlflow-sdk[plane]'` → `controlplane --project <dir>` (or the equivalent `python -m controlflow_sdk.plane`). |
+| Control plane — First-run setup | view | Shown when an engagement has no name yet: name the engagement + pick a framework, or one-click **Load the Northwind demo** (bundled in the wheel, copied into the engagement so it runs immediately). |
+| Control plane — Dashboard | view | Lists controls + last-run status; entry point to author, run, and export. Engagement name renders in the header. |
 | Control plane — Source manager | view | Upload a data file into the engagement + map columns (display name, data type, is-key, include) → persisted to `controlplane.db`. |
 | Control plane — Control editor | view | Author a control: metadata + framework refs + failure threshold + source binding, with a **no-code rule builder** (HTMX) or a **Python escape hatch** (CodeMirror). |
 | Control plane — Run view | view | Per-run results (totals + violations table) with the **rendered workpaper embedded**. |

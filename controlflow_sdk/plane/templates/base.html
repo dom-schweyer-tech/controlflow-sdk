@@ -9,7 +9,7 @@
   {% block head %}{% endblock %}
 </head>
 <body>
-  <header><strong>ControlFlow Control Plane</strong> — {{ project.name }}</header>
+  <header><strong>ControlFlow Control Plane</strong>{% if project and project.name %} — {{ project.name }}{% endif %}</header>
   <main>{% block body %}{% endblock %}</main>
 </body>
 </html>

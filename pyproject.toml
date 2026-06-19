@@ -31,6 +31,16 @@ controlplane = "controlflow_sdk.plane.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["controlflow_sdk"]
 
+# Ship the Northwind demo inside the package so a pip-installed control plane can
+# offer one-click "Load the demo" without a repo checkout. examples/ is the single
+# source of truth (out-of-package → force-include is the correct tool; see
+# docs/learnings/0003). Map only the files the demo loader needs.
+[tool.hatch.build.targets.wheel.force-include]
+"examples/northwind-trading/cflow.yaml" = "controlflow_sdk/_demo/northwind-trading/cflow.yaml"
+"examples/northwind-trading/sources.yaml" = "controlflow_sdk/_demo/northwind-trading/sources.yaml"
+"examples/northwind-trading/controls" = "controlflow_sdk/_demo/northwind-trading/controls"
+"examples/northwind-trading/data" = "controlflow_sdk/_demo/northwind-trading/data"
+
 
 [tool.pytest.ini_options]
 filterwarnings = [
