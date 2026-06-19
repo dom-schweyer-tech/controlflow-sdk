@@ -12,10 +12,37 @@ from controlflow_sdk.store import repo
 from controlflow_sdk.store.db import connect
 
 
+def _typed(value: str) -> Any:
+    v = value.strip()
+    low = v.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    try:
+        f = float(v)
+        return int(f) if f.is_integer() else f
+    except ValueError:
+        return v
+
+
 def _rule_spec_from_form(form: Any) -> dict[str, Any]:
+    columns = form.getlist("cond_column")
+    ops = form.getlist("cond_op")
+    values = form.getlist("cond_value")
+    conditions: list[dict[str, Any]] = []
+    for col, op, raw in zip(columns, ops, values):
+        if not col:
+            continue
+        cond: dict[str, Any] = {"column": col, "op": op}
+        if op in ("is_empty", "not_empty", "is_duplicate"):
+            pass
+        elif op in ("in", "not_in"):
+            cond["value"] = [_typed(p) for p in raw.split("|") if p.strip()]
+        else:
+            cond["value"] = _typed(raw)
+        conditions.append(cond)
     return {
         "logic": form.get("rule_logic", "all"),
-        "conditions": [],
+        "conditions": conditions,
         "severity": form.get("rule_severity", "medium"),
         "description_template": form.get("rule_description", ""),
         "item_key_column": form.get("rule_item_key") or None,
@@ -52,6 +79,12 @@ def register(
     templates: Jinja2Templates,
     get_conn: Callable[..., Generator[sqlite3.Connection, None, None]],
 ) -> None:
+    @app.get("/controls/_condition_row", response_class=HTMLResponse)
+    def condition_row(request: Request) -> Any:
+        return templates.TemplateResponse(
+            request, "partials/rule_condition.html", {}
+        )
+
     @app.get("/controls/new", response_class=HTMLResponse)
     def new_control(
         request: Request,

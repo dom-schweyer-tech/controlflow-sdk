@@ -80,9 +80,7 @@
 
   <fieldset>
     <legend>Rule Builder</legend>
-    <p><em>Rule builder coming soon (Task 19).</em></p>
-    <input type="hidden" name="rule_logic" value="all">
-    <input type="hidden" name="rule_severity" value="medium">
+    {% include "partials/rule_builder.html" %}
   </fieldset>
 
   <p><button type="submit">{% if control %}Save Changes{% else %}Create Control{% endif %}</button></p>
