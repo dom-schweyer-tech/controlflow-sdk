@@ -32,7 +32,9 @@ def test_save_column_mapping(client):
     # persisted
     from controlflow_sdk.store import repo
     from controlflow_sdk.store.db import connect
-    src = repo.get_source(connect(client.app.state.project_root), "tx")
+    conn = connect(client.app.state.project_root)
+    src = repo.get_source(conn, "tx")
+    conn.close()
     assert src["key_config"] == {"mode": "single", "columns": ["user_id"]}
     amount = next(c for c in src["columns"] if c["original_name"] == "amount")
     assert amount["data_type"] == "number" and amount["display_name"] == "Amount"

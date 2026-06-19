@@ -80,7 +80,6 @@ def register(
             form = await request.form()
             existing = repo.get_source(conn, source_id)
             if existing is None:
-                conn.close()
                 return RedirectResponse("/sources", status_code=303)
             key_columns = [
                 k.strip()
