@@ -24,9 +24,12 @@ def test_first_run_shows_setup_screen(fresh_client: TestClient):
     assert "New control" not in resp.text
 
 
-def test_header_has_no_trailing_dash_before_naming(fresh_client: TestClient):
+def test_header_shows_no_engagement_chip_before_naming(fresh_client: TestClient):
+    # The header renders the engagement name in a .chip once set; on first run there is
+    # no name, so no empty chip (and no nav-to-nowhere) should appear.
     resp = fresh_client.get("/")
-    assert "ControlFlow Control Plane</strong> —" not in resp.text
+    assert 'class="chip"' not in resp.text
+    assert 'class="app-nav"' not in resp.text
 
 
 def test_post_setup_names_engagement_and_shows_dashboard(fresh_client: TestClient, tmp_path: Path):
