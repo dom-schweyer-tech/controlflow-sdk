@@ -46,8 +46,13 @@ def build_cmd(args: argparse.Namespace) -> int:
     # ── Load project to get control/run counts for summary ────────────────────
     try:
         conn = connect(root)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR connecting to store at {root}: {exc}", file=sys.stderr)
+        return 1
+    try:
         project = load_project_from_store(conn)
     except Exception as exc:  # noqa: BLE001
+        conn.close()
         print(f"ERROR loading project at {root}: {exc}", file=sys.stderr)
         return 1
 

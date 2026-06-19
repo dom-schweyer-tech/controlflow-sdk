@@ -3,6 +3,20 @@ import json
 import zipfile
 
 
+def test_export_no_runs_returns_400_not_500(client):
+    """POST /export with no runs must return 400 with a helpful message, not 500."""
+    resp = client.post("/export")
+    assert resp.status_code != 500, (
+        "POST /export with no runs raised an unhandled 500; "
+        "expected a 400 with a 'run a control first' message"
+    )
+    assert resp.status_code == 400
+    body = resp.json()
+    # Body must mention the missing-run condition
+    combined = json.dumps(body).lower()
+    assert "run" in combined, f"Response body does not mention 'run': {body}"
+
+
 def _ran_control(client):
     csv = b"user_id,can_create,can_approve\nU1,true,true\n"
     client.post(

@@ -28,7 +28,9 @@ def _to_run_dicts(conn: sqlite3.Connection, controls: list) -> dict[str, list[di
 
     out: dict[str, list[dict]] = {}
     for c in controls:
-        runs = repo.list_runs_for(conn, c.id)
+        # list_runs_for returns DESC (newest-first); reverse to ASC so that
+        # runs[-1] in assemble_bundle correctly selects the latest run.
+        runs = list(reversed(repo.list_runs_for(conn, c.id)))
         if not runs:
             continue
         rebuilt = []

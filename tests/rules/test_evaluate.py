@@ -83,3 +83,48 @@ def test_unknown_template_placeholder_left_literal():
         "conditions": [{"column": "flag", "op": "eq", "value": True}],
         "description_template": "User {user_id} has {missing}"})
     assert evaluate_rule(spec, _pop(df))[0]["description"] == "User U1 has {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Operator coverage: ne, ge, le, lt, not_in
+# ---------------------------------------------------------------------------
+
+
+def test_ne_operator():
+    """ne flags rows where column != value."""
+    df = pd.DataFrame({"user_id": ["U1", "U2", "U3"], "status": ["active", "inactive", "active"]})
+    spec = parse_rule_spec({"logic": "all", "conditions": [
+        {"column": "status", "op": "ne", "value": "active"}]})
+    assert [v["item_key"] for v in evaluate_rule(spec, _pop(df))] == ["U2"]
+
+
+def test_ge_operator():
+    """ge flags rows where column >= value (boundary inclusive)."""
+    df = pd.DataFrame({"user_id": ["U1", "U2", "U3"], "score": [10, 20, 30]})
+    spec = parse_rule_spec({"logic": "all", "conditions": [
+        {"column": "score", "op": "ge", "value": 20}]})
+    assert [v["item_key"] for v in evaluate_rule(spec, _pop(df))] == ["U2", "U3"]
+
+
+def test_le_operator():
+    """le flags rows where column <= value (boundary inclusive)."""
+    df = pd.DataFrame({"user_id": ["U1", "U2", "U3"], "score": [10, 20, 30]})
+    spec = parse_rule_spec({"logic": "all", "conditions": [
+        {"column": "score", "op": "le", "value": 20}]})
+    assert [v["item_key"] for v in evaluate_rule(spec, _pop(df))] == ["U1", "U2"]
+
+
+def test_lt_operator():
+    """lt flags rows where column < value (strictly less than)."""
+    df = pd.DataFrame({"user_id": ["U1", "U2", "U3"], "score": [10, 20, 30]})
+    spec = parse_rule_spec({"logic": "all", "conditions": [
+        {"column": "score", "op": "lt", "value": 20}]})
+    assert [v["item_key"] for v in evaluate_rule(spec, _pop(df))] == ["U1"]
+
+
+def test_not_in_operator():
+    """not_in flags rows where column is NOT in the given set."""
+    df = pd.DataFrame({"user_id": ["U1", "U2", "U3"], "role": ["admin", "user", "root"]})
+    spec = parse_rule_spec({"logic": "all", "conditions": [
+        {"column": "role", "op": "not_in", "value": ["admin", "root"]}]})
+    assert [v["item_key"] for v in evaluate_rule(spec, _pop(df))] == ["U2"]
