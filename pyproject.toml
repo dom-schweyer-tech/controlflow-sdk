@@ -31,9 +31,6 @@ controlplane = "controlflow_sdk.plane.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["controlflow_sdk"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"controlflow_sdk/plane/templates" = "controlflow_sdk/plane/templates"
-"controlflow_sdk/plane/static" = "controlflow_sdk/plane/static"
 
 [tool.pytest.ini_options]
 filterwarnings = [
