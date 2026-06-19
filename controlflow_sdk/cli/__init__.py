@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from controlflow_sdk.cli.build_cmd import build_cmd
+from controlflow_sdk.cli.import_cmd import import_cmd
 from controlflow_sdk.cli.run_cmd import run_cmd
 from controlflow_sdk.cli.scaffold import scaffold_control, scaffold_project
 from controlflow_sdk.project import ProjectError, load_sources
@@ -189,6 +190,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Execution timestamp in ISO-8601 format (default: current UTC time).",
     )
 
+    # -- import --------------------------------------------------------------
+    import_p = sub.add_parser(
+        "import",
+        help="Import a YAML project into a controlplane.db engagement store.",
+    )
+    import_p.add_argument(
+        "src",
+        help="Path to the YAML project directory (must contain cflow.yaml).",
+    )
+    import_p.add_argument(
+        "--into",
+        default=None,
+        metavar="<dir>",
+        help="Target engagement directory (default: same as src).",
+    )
+
     # -- build ---------------------------------------------------------------
     build_p = sub.add_parser(
         "build",
@@ -245,6 +262,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.at is None:
             args.at = datetime.now(UTC).isoformat()
         return run_cmd(args)
+
+    if args.command == "import":
+        return import_cmd(args)
 
     if args.command == "build":
         # Clock boundary: inject current UTC time only when --at is not supplied.
