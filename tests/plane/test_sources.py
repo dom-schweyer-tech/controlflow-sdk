@@ -218,6 +218,35 @@ def test_definition_tab_has_nav_and_no_datafile_card(client):
     assert "/sources/d/refresh" not in page
 
 
+def test_data_tab_preview_paging_and_count(client):
+    rows = b"id,val\n" + b"".join(f"R{i},{i}\n".encode() for i in range(1, 121))
+    client.post("/sources", data={"source_id": "big", "format": "csv",
+                                   "as_of_date": "2026-01-01"},
+                files={"file": ("big.csv", io.BytesIO(rows), "text/csv")},
+                follow_redirects=False)
+    p1 = client.get("/sources/big/data").text
+    assert "120" in p1                      # record count shown
+    assert "R1" in p1 and "R50" in p1       # first page (page size 50)
+    assert "R51" not in p1
+    p2 = client.get("/sources/big/data?page=2").text
+    assert "R51" in p2 and "R100" in p2
+
+
+def test_data_tab_asof_edit_syncs(client):
+    client.post("/sources", data={"source_id": "z", "format": "csv",
+                                   "as_of_date": "2026-01-01"},
+                files={"file": ("z.csv", io.BytesIO(b"a\n1\n"), "text/csv")},
+                follow_redirects=False)
+    client.post("/sources/z/data/asof", data={"as_of_date": "2026-07-07"},
+                follow_redirects=False)
+    from controlflow_sdk.store import repo
+    from controlflow_sdk.store.db import connect
+    conn = connect(client.app.state.project_root)
+    assert repo.get_current_file(conn, "z")["as_of_date"] == "2026-07-07"
+    assert repo.get_source(conn, "z")["extract_date"] == "2026-07-07"
+    conn.close()
+
+
 def test_blank_title_clears_to_none(client):
     csv = b"a\n1\n"
     client.post("/sources", data={"source_id": "s", "format": "csv"},

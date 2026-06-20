@@ -15,6 +15,8 @@ from fastapi.templating import Jinja2Templates
 from controlflow_sdk.store import repo
 from controlflow_sdk.store.db import connect
 
+PAGE_SIZE = 50
+
 # ---- data-file versioning helpers -----------------------------------------
 # Refreshing a source's data never destroys the old file: the prior file is
 # copied into data/.versions/<id>/ before being overwritten, and uploads awaiting
@@ -137,6 +139,53 @@ def register(
              "source": repo.get_source(conn, source_id),
              "active": "definition"},
         )
+
+    @app.get("/sources/{source_id}/data", response_class=HTMLResponse)
+    def source_data(
+        source_id: str,
+        request: Request,
+        page: int = 1,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> Any:
+        root = request.app.state.project_root
+        current = repo.get_current_file(conn, source_id)
+        header: list[str] = []
+        rows: list[list[str]] = []
+        total = 0
+        if current:
+            fpath = root / current["stored_path"]
+            if fpath.is_file():
+                all_rows = list(
+                    csvmod.reader(io.StringIO(fpath.read_text(encoding="utf-8-sig")))
+                )
+                if all_rows:
+                    header, data_rows = all_rows[0], all_rows[1:]
+                    total = len(data_rows)
+                    page = max(1, page)
+                    start = (page - 1) * PAGE_SIZE
+                    rows = data_rows[start:start + PAGE_SIZE]
+        page_count = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        return templates.TemplateResponse(
+            request, "source_data.html",
+            {"project": repo.get_project(conn) or {"name": ""},
+             "source": repo.get_source(conn, source_id), "current": current,
+             "header": header, "rows": rows, "total": total,
+             "page": min(page, page_count), "page_count": page_count, "active": "data"},
+        )
+
+    @app.post("/sources/{source_id}/data/asof")
+    async def update_asof(
+        source_id: str,
+        request: Request,
+        as_of_date: str = Form(""),
+    ) -> Any:
+        root = request.app.state.project_root
+        conn = connect(root)
+        try:
+            repo.set_current_file_asof(conn, source_id, as_of_date.strip() or None)
+            return RedirectResponse(f"/sources/{source_id}/data", status_code=303)
+        finally:
+            conn.close()
 
     @app.post("/sources/{source_id}")
     async def save_source(

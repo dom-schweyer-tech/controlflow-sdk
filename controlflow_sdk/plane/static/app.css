@@ -318,3 +318,6 @@ legend {
 /* ── source data-file versioning ──────────────────────────────────────────── */
 .version-list, .diff-list { margin: 8px 0 0; padding-left: 18px; }
 .version-list li, .diff-list li { margin: 4px 0; }
+.inline-asof { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.inline-asof input { margin-top: 0; }
+.pager { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
