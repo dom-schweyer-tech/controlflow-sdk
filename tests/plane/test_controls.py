@@ -36,3 +36,19 @@ def test_edit_control_shows_values(client):
     page = client.get("/controls/py2")
     assert page.status_code == 200
     assert "Editable" in page.text
+
+
+def test_source_picker_shows_title_and_view_link(client):
+    _make_source(client, sid="invoices")
+    # Give the source a friendly title.
+    client.post("/sources/invoices", data={
+        "title": "Vendor Invoice Register",
+        "display_name__user_id": "User ID", "data_type__user_id": "text",
+        "display_name__can_create": "Can Create", "data_type__can_create": "text",
+        "display_name__can_approve": "Can Approve", "data_type__can_approve": "text",
+    }, follow_redirects=False)
+    page = client.get("/controls/new").text
+    assert "Vendor Invoice Register" in page  # friendly title is the label
+    assert "(invoices)" in page  # code id shown in parentheses
+    # A View link jumps to the source in a new tab.
+    assert 'href="/sources/invoices"' in page and 'target="_blank"' in page

@@ -40,21 +40,22 @@ def get_project(conn: sqlite3.Connection) -> dict | None:
 # ---- sources + columns -----------------------------------------------------
 def upsert_source(
     conn: sqlite3.Connection, *, id: str, format: str, path: str,
-    key_config: dict, description: str | None = None,
+    key_config: dict, title: str | None = None, description: str | None = None,
     completeness_accuracy: str | None = None, extract_date: str | None = None,
     created_at: str = "",
 ) -> None:
     conn.execute(
         """INSERT INTO sources
-             (id, format, path, key_config, description,
+             (id, format, path, key_config, title, description,
               completeness_accuracy, extract_date, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              format=excluded.format, path=excluded.path,
-             key_config=excluded.key_config, description=excluded.description,
+             key_config=excluded.key_config, title=excluded.title,
+             description=excluded.description,
              completeness_accuracy=excluded.completeness_accuracy,
              extract_date=excluded.extract_date""",
-        (id, format, path, json.dumps(key_config), description,
+        (id, format, path, json.dumps(key_config), title, description,
          completeness_accuracy, extract_date, created_at),
     )
     conn.commit()
@@ -108,6 +109,90 @@ def list_sources(conn: sqlite3.Connection) -> list[dict]:
         if src is not None:
             sources.append(src)
     return sources
+
+
+# ---- source files (per-file data lineage) ----------------------------------
+def _insert_current_file(
+    conn: sqlite3.Connection, *, source_id: str, stored_path: str,
+    original_name: str, as_of_date: str | None, row_count: int | None,
+    uploaded_at: str,
+) -> None:
+    conn.execute(
+        """INSERT INTO source_files
+             (source_id, stored_path, original_name, as_of_date, row_count,
+              uploaded_at, is_current)
+           VALUES (?, ?, ?, ?, ?, ?, 1)""",
+        (source_id, stored_path, original_name, as_of_date, row_count, uploaded_at),
+    )
+
+
+def set_initial_file(
+    conn: sqlite3.Connection, *, source_id: str, stored_path: str,
+    original_name: str, as_of_date: str | None, row_count: int | None,
+    uploaded_at: str = "",
+) -> None:
+    """Replace all file rows for a source with one current row (import/create)."""
+    conn.execute("DELETE FROM source_files WHERE source_id = ?", (source_id,))
+    _insert_current_file(conn, source_id=source_id, stored_path=stored_path,
+                         original_name=original_name, as_of_date=as_of_date,
+                         row_count=row_count, uploaded_at=uploaded_at)
+    conn.commit()
+
+
+def record_current_file(
+    conn: sqlite3.Connection, *, source_id: str, stored_path: str,
+    original_name: str, as_of_date: str | None, row_count: int | None,
+    uploaded_at: str = "",
+) -> None:
+    """Demote any current row, then add a new current row (refresh)."""
+    conn.execute(
+        "UPDATE source_files SET is_current = 0 WHERE source_id = ? AND is_current = 1",
+        (source_id,),
+    )
+    _insert_current_file(conn, source_id=source_id, stored_path=stored_path,
+                         original_name=original_name, as_of_date=as_of_date,
+                         row_count=row_count, uploaded_at=uploaded_at)
+    conn.commit()
+
+
+def archive_current_file(
+    conn: sqlite3.Connection, source_id: str, new_stored_path: str
+) -> None:
+    conn.execute(
+        "UPDATE source_files SET is_current = 0, stored_path = ? "
+        "WHERE source_id = ? AND is_current = 1",
+        (new_stored_path, source_id),
+    )
+    conn.commit()
+
+
+def get_current_file(conn: sqlite3.Connection, source_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM source_files WHERE source_id = ? AND is_current = 1",
+        (source_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_source_files(conn: sqlite3.Connection, source_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM source_files WHERE source_id = ? "
+        "ORDER BY is_current DESC, uploaded_at DESC, id DESC",
+        (source_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_current_file_asof(
+    conn: sqlite3.Connection, source_id: str, as_of_date: str | None
+) -> None:
+    conn.execute(
+        "UPDATE source_files SET as_of_date = ? WHERE source_id = ? AND is_current = 1",
+        (as_of_date, source_id),
+    )
+    conn.execute("UPDATE sources SET extract_date = ? WHERE id = ?",
+                 (as_of_date, source_id))
+    conn.commit()
 
 
 # ---- controls + bindings ---------------------------------------------------

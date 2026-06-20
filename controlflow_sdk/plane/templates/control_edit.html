@@ -78,11 +78,16 @@
     {% if sources %}
     <div class="check-list">
       {% for source in sources %}
-      <label>
-        <input type="checkbox" name="source_ids" value="{{ source.id }}"
-               {% if control and source.id in control.source_ids %}checked{% endif %}>
-        <span class="mono">{{ source.id }}</span>
-      </label>
+      <div class="check-row">
+        <label>
+          <input type="checkbox" name="source_ids" value="{{ source.id }}"
+                 {% if control and source.id in control.source_ids %}checked{% endif %}>
+          <span class="src-name">{{ source.title or source.id }}</span>
+          {% if source.title %}<span class="mono muted">({{ source.id }})</span>{% endif %}
+        </label>
+        <a class="btn btn-sm btn-ghost" href="/sources/{{ source.id }}"
+           target="_blank" rel="noopener">View ↗</a>
+      </div>
       {% endfor %}
     </div>
     {% else %}

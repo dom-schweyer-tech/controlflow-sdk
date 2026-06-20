@@ -192,6 +192,13 @@ legend {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 0; font-size: 13px; color: var(--text-primary); cursor: pointer;
 }
+.check-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.check-row label { flex: 1; min-width: 0; padding: 8px 0; }
+.check-row .src-name { font-weight: 500; }
+.check-row .mono.muted { font-size: 12px; }
+.check-row + .check-row { border-top: 1px solid var(--border-subtle, var(--border-default)); }
 .radio-row { display: flex; gap: 20px; }
 .radio-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
 
@@ -208,10 +215,10 @@ legend {
   background: var(--accent-primary); border-color: var(--accent-primary); color: #fff;
 }
 .btn-primary:hover, button[type="submit"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
-.btn-ghost {
+.btn-ghost, button.btn-ghost {
   background: transparent; border-color: var(--border-strong); color: var(--text-secondary);
 }
-.btn-ghost:hover { background: var(--bg-surface-2); color: var(--text-primary); }
+.btn-ghost:hover, button.btn-ghost:hover { background: var(--bg-surface-2); color: var(--text-primary); }
 .btn-sm { padding: 5px 12px; font-size: 12px; }
 .btn-add {
   background: transparent; border: 1px dashed var(--border-strong); color: var(--text-secondary);
@@ -219,6 +226,15 @@ legend {
 }
 .btn-add:hover { background: var(--bg-surface-1); color: var(--accent-primary); border-color: var(--accent-primary); }
 .inline-form { display: inline; margin: 0; }
+
+/* ── tabs ─────────────────────────────────────────────────────────────────── */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-default); margin: 0 0 20px; }
+.tabs .tab {
+  padding: 8px 16px; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  border-bottom: 2px solid transparent; text-decoration: none;
+}
+.tabs .tab:hover { color: var(--text-primary); }
+.tabs .tab.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
 
 /* ── badges / pills / chips ───────────────────────────────────────────────── */
 .chip {
@@ -293,3 +309,15 @@ legend {
   border-top: 1px solid var(--border-default);
   color: var(--text-tertiary); font-size: 12px;
 }
+
+/* ── first-run onboarding ─────────────────────────────────────────────────── */
+.setup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.setup-grid .card { margin-bottom: 0; }
+.setup-grid datalist { display: none; }
+
+/* ── source data-file versioning ──────────────────────────────────────────── */
+.version-list, .diff-list { margin: 8px 0 0; padding-left: 18px; }
+.version-list li, .diff-list li { margin: 4px 0; }
+.inline-asof { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.inline-asof input { margin-top: 0; }
+.pager { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
