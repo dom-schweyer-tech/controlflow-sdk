@@ -29,6 +29,10 @@ def test_import_project_returns_counts_and_rows(tmp_path: Path):
     # Author-facing source titles round-trip from sources.yaml into the store.
     invoices = repo.get_source(conn, "invoices")
     assert invoices["title"] == "Vendor Invoice Register"
+    # Importing a source records a current file row carrying the file's as-of date.
+    cur = repo.get_current_file(conn, "invoices")
+    assert cur is not None and cur["is_current"] == 1
+    assert cur["as_of_date"] == "2026-03-31"
 
 
 def test_demo_source_dir_has_definition_and_data():

@@ -42,13 +42,14 @@ def test_save_column_mapping(client):
 
 def test_save_source_metadata_persists(client):
     csv = b"invoice_id,amount\nINV1,5\n"
-    client.post("/sources", data={"source_id": "invoices", "format": "csv"},
+    # Supply as_of_date on create so extract_date is set via the file-upload flow.
+    client.post("/sources", data={"source_id": "invoices", "format": "csv",
+                                   "as_of_date": "2026-03-31"},
                 files={"file": ("invoices.csv", io.BytesIO(csv), "text/csv")},
                 follow_redirects=False)
     resp = client.post("/sources/invoices", data={
         "title": "Vendor Invoice Register",
         "description": "AP invoice extract for the period.",
-        "extract_date": "2026-03-31",
         "key_columns": "invoice_id",
         "display_name__invoice_id": "Invoice ID", "data_type__invoice_id": "text",
         "is_key__invoice_id": "on", "include__invoice_id": "on",
@@ -64,12 +65,13 @@ def test_save_source_metadata_persists(client):
     conn.close()
     assert src["title"] == "Vendor Invoice Register"
     assert src["description"] == "AP invoice extract for the period."
+    # extract_date set via as_of_date on create and preserved by save_source.
     assert src["extract_date"] == "2026-03-31"
 
-    # The list shows the friendly title; the edit page round-trips the fields.
+    # The list shows the friendly title; the edit page round-trips the title.
     assert "Vendor Invoice Register" in client.get("/sources").text
     edit = client.get("/sources/invoices").text
-    assert "Vendor Invoice Register" in edit and "2026-03-31" in edit
+    assert "Vendor Invoice Register" in edit
 
 
 def _upload(client, sid, csv):
@@ -124,7 +126,6 @@ def test_refresh_same_columns_archives_and_preserves_mapping(client):
     assert (root / "data" / "tx.csv").read_bytes() == new  # data replaced
     versions = list((root / "data" / ".versions" / "tx").glob("*"))
     assert len(versions) == 1  # old file archived, not lost
-    assert "Previous versions" in client.get("/sources/tx").text
 
 
 def test_refresh_diff_columns_reconciles_after_confirm(client):
@@ -171,6 +172,41 @@ def test_refresh_cancel_discards_pending_and_keeps_current(client):
     assert (root / "data" / "keep.csv").read_bytes() == original  # untouched
     assert not list((root / "data" / ".versions" / "keep").glob("*")) if (
         root / "data" / ".versions" / "keep").is_dir() else True  # nothing archived
+
+
+def test_create_records_current_file_with_asof(client):
+    client.post("/sources", data={"source_id": "inv", "format": "csv",
+                                   "as_of_date": "2026-05-01"},
+                files={"file": ("inv.csv", io.BytesIO(b"a\n1\n"), "text/csv")},
+                follow_redirects=False)
+    from controlflow_sdk.store import repo
+    from controlflow_sdk.store.db import connect
+    conn = connect(client.app.state.project_root)
+    cur = repo.get_current_file(conn, "inv")
+    assert cur["as_of_date"] == "2026-05-01" and cur["original_name"] == "inv.csv"
+    assert repo.get_source(conn, "inv")["extract_date"] == "2026-05-01"
+    conn.close()
+
+
+def test_refresh_confirm_records_new_version_with_asof(client):
+    _upload(client, "tx", b"user_id,amount\nU1,5\n")  # helper defined earlier in file
+    # set an initial as-of via the create path is skipped here; refresh supplies its own
+    client.post("/sources/tx/refresh",
+                data={"as_of_date": "2026-06-30"},
+                files={"file": ("tx.csv", io.BytesIO(b"user_id,amount\nU1,5\nU2,9\n"),
+                                "text/csv")},
+                follow_redirects=False)
+    client.post("/sources/tx/refresh/confirm",
+                data={"pending": "tx.csv", "as_of_date": "2026-06-30"},
+                follow_redirects=False)
+    from controlflow_sdk.store import repo
+    from controlflow_sdk.store.db import connect
+    conn = connect(client.app.state.project_root)
+    files = repo.list_source_files(conn, "tx")
+    assert len(files) == 2  # initial + refreshed
+    assert files[0]["is_current"] == 1 and files[0]["as_of_date"] == "2026-06-30"
+    assert repo.get_source(conn, "tx")["extract_date"] == "2026-06-30"
+    conn.close()
 
 
 def test_blank_title_clears_to_none(client):

@@ -67,6 +67,12 @@ def import_project(conn: sqlite3.Connection, src: Path) -> tuple[int, int]:
                 for i, m in enumerate(binding.column_mappings)
             ],
         )
+        _path = binding.config.get("path", "")
+        repo.set_initial_file(
+            conn, source_id=sid, stored_path=_path,
+            original_name=Path(_path).name, as_of_date=binding.extract_date,
+            row_count=None, uploaded_at="",
+        )
 
     for control in project.controls:
         code = Path(control.test_path).read_text(encoding="utf-8") if control.test_path else ""

@@ -37,24 +37,9 @@ def _stamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _fmt_stamp(stamp: str) -> str:
-    try:
-        return datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%d %H:%M UTC")
-    except ValueError:
-        return stamp
-
-
-def _list_versions(root: Path, sid: str) -> list[dict[str, str]]:
-    d = _archive_dir(root, sid)
-    if not d.is_dir():
-        return []
-    out: list[dict[str, str]] = []
-    for p in sorted(d.iterdir(), reverse=True):  # filename stamps sort newest-first
-        if not p.is_file():
-            continue
-        stamp, _, name = p.name.partition("__")
-        out.append({"file": p.name, "name": name or p.name, "label": _fmt_stamp(stamp)})
-    return out
+def _row_count(raw: bytes) -> int:
+    n = sum(1 for _ in csvmod.reader(io.StringIO(raw.decode("utf-8-sig"))))
+    return max(0, n - 1)  # exclude header
 
 
 def _reconcile_columns(
@@ -108,6 +93,7 @@ def register(
         request: Request,
         source_id: str = Form(...),
         format: str = Form("csv"),
+        as_of_date: str = Form(""),
         file: UploadFile = File(...),
     ) -> Any:
         root = request.app.state.project_root
@@ -125,6 +111,15 @@ def register(
                  "is_key": False, "include": True, "ordinal": i}
                 for i, h in enumerate(header)
             ])
+            repo.set_initial_file(
+                conn, source_id=source_id, stored_path=f"data/{dest.name}",
+                original_name=dest.name, as_of_date=as_of_date.strip() or None,
+                row_count=_row_count(raw), uploaded_at=_stamp(),
+            )
+            if as_of_date.strip():
+                conn.execute("UPDATE sources SET extract_date = ? WHERE id = ?",
+                             (as_of_date.strip(), source_id))
+                conn.commit()
         finally:
             conn.close()
         return RedirectResponse(f"/sources/{source_id}", status_code=303)
@@ -135,13 +130,11 @@ def register(
         request: Request,
         conn: sqlite3.Connection = Depends(get_conn),
     ) -> Any:
-        root = request.app.state.project_root
         return templates.TemplateResponse(
             request,
             "source_edit.html",
             {"project": repo.get_project(conn) or {"name": ""},
-             "source": repo.get_source(conn, source_id),
-             "versions": _list_versions(root, source_id)},
+             "source": repo.get_source(conn, source_id)},
         )
 
     @app.post("/sources/{source_id}")
@@ -190,7 +183,7 @@ def register(
                 description=_field("description"),
                 # Not exposed in the editor form — preserve the imported value.
                 completeness_accuracy=existing.get("completeness_accuracy"),
-                extract_date=_field("extract_date"),
+                extract_date=existing.get("extract_date"),
             )
         finally:
             conn.close()
@@ -201,6 +194,7 @@ def register(
         source_id: str,
         request: Request,
         file: UploadFile = File(...),
+        as_of_date: str = Form(""),
     ) -> Any:
         """Stage a new data file and show a confirm page with the column diff."""
         root = request.app.state.project_root
@@ -221,7 +215,8 @@ def register(
                 "source_refresh.html",
                 {"project": repo.get_project(conn) or {"name": ""},
                  "source": existing, "pending": pending_name,
-                 "new_headers": new_headers, "added": added, "removed": removed},
+                 "new_headers": new_headers, "added": added, "removed": removed,
+                 "as_of_date": as_of_date},
             )
         finally:
             conn.close()
@@ -231,6 +226,7 @@ def register(
         source_id: str,
         request: Request,
         pending: str = Form(...),
+        as_of_date: str = Form(""),
     ) -> Any:
         """Archive the current file, promote the staged file, reconcile columns."""
         root = request.app.state.project_root
@@ -245,12 +241,12 @@ def register(
             new_bytes = pending_path.read_bytes()
 
             current_path = root / existing["path"]
+            stamp = _stamp()
+            archive_rel = Path("data/.versions") / source_id / f"{stamp}__{current_path.name}"
             if current_path.is_file():  # never overwrite without keeping the old file
-                adir = _archive_dir(root, source_id)
+                adir = root / "data" / ".versions" / source_id
                 adir.mkdir(parents=True, exist_ok=True)
-                (adir / f"{_stamp()}__{current_path.name}").write_bytes(
-                    current_path.read_bytes()
-                )
+                (root / archive_rel).write_bytes(current_path.read_bytes())
             current_path.parent.mkdir(parents=True, exist_ok=True)
             current_path.write_bytes(new_bytes)  # path stays stable across refreshes
             pending_path.unlink()
@@ -270,12 +266,22 @@ def register(
             else:
                 key_config = {"mode": "auto"}
 
+            # Record the new current file version (old one archived above).
+            repo.archive_current_file(conn, source_id, str(archive_rel))
+            repo.record_current_file(
+                conn, source_id=source_id, stored_path=existing["path"],
+                original_name=Path(pending).name,
+                as_of_date=as_of_date.strip() or None,
+                row_count=_row_count(new_bytes), uploaded_at=stamp,
+            )
+
+            new_extract_date = as_of_date.strip() or existing.get("extract_date")
             repo.upsert_source(
                 conn, id=source_id, format=existing["format"],
                 path=existing["path"], key_config=key_config,
                 title=existing.get("title"), description=existing.get("description"),
                 completeness_accuracy=existing.get("completeness_accuracy"),
-                extract_date=existing.get("extract_date"),
+                extract_date=new_extract_date,
             )
             return RedirectResponse(f"/sources/{source_id}", status_code=303)
         finally:
