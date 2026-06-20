@@ -53,6 +53,42 @@ def test_run_persists_and_renders(tmp_path: Path):
     assert "<!doctype html>" in html.lower()
 
 
+def _seed_inline(tmp_path: Path):
+    """An inline-python control whose test_code is embedded directly in the store."""
+    (tmp_path / "data").mkdir()
+    pd.DataFrame({"user_id": ["U1", "U2"], "can_create": ["true", "true"]}).to_csv(
+        tmp_path / "data" / "users.csv", index=False)
+    conn = connect(tmp_path)
+    migrate(conn)
+    repo.upsert_project(conn, name="Acme")
+    repo.upsert_source(conn, id="users", format="csv", path="data/users.csv",
+                       key_config={"mode": "single", "columns": ["user_id"]})
+    repo.set_columns(conn, "users", [
+        {"original_name": "user_id", "display_name": "User ID", "data_type": "text",
+         "is_key": True, "include": True, "ordinal": 0},
+        {"original_name": "can_create", "display_name": "Can Create",
+         "data_type": "boolean", "is_key": False, "include": True, "ordinal": 1},
+    ])
+    repo.upsert_control(conn, id="inline", title="Inline", objective="o", narrative="n",
+                        framework_refs={"nist": ["AC-2"]}, test_kind="python",
+                        test_code="# inline\ndef test(pop):\n    return []\n",
+                        failure_threshold_count=0)
+    repo.set_control_sources(conn, "inline", ["users"])
+    return conn
+
+
+def test_run_persists_inline_control_test_code(tmp_path: Path):
+    """An inline-python control's test_code is rendered verbatim in the workpaper.
+
+    Pins the inline branch of run_service's resolver wrapper (the rule branch is
+    exercised by test_run_persists_and_renders).
+    """
+    conn = _seed_inline(tmp_path)
+    run_control_in_store(conn, tmp_path, "inline", "2026-03-31T00:00:00+00:00")
+    md = (tmp_path / "target" / "workpapers" / "inline.md").read_text()
+    assert "# inline" in md
+
+
 def _seed_cross_source(tmp_path: Path):
     """A terminated-access control: AD accounts whose user is NOT in the HR roster."""
     (tmp_path / "data").mkdir()
