@@ -26,6 +26,9 @@ def test_import_project_returns_counts_and_rows(tmp_path: Path):
     assert len(repo.list_controls(conn)) == 8
     assert len(repo.list_sources(conn)) == 8
     assert repo.get_project(conn)["name"]
+    # Author-facing source titles round-trip from sources.yaml into the store.
+    invoices = repo.get_source(conn, "invoices")
+    assert invoices["title"] == "Vendor Invoice Register"
 
 
 def test_demo_source_dir_has_definition_and_data():

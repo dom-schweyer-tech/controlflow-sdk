@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Forward-only, idempotent DDL. Index = target user_version.
 _STEPS: list[str] = [
@@ -75,6 +75,13 @@ _STEPS: list[str] = [
         severity      TEXT NOT NULL DEFAULT 'medium',
         details       TEXT NOT NULL DEFAULT '{}'  -- JSON
     );
+    """,
+    # --- step 2 -> user_version 2 -------------------------------------------
+    # Author-facing display title for a source (shown in the source picker, the
+    # sources list, and the source editor). Display/UI metadata only — it is NOT
+    # carried into the export bundle (see SourceBinding.to_data_source()).
+    """
+    ALTER TABLE sources ADD COLUMN title TEXT;
     """,
 ]
 

@@ -4,6 +4,8 @@ import csv as csvmod
 import io
 import sqlite3
 from collections.abc import Callable, Generator
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
@@ -12,6 +14,66 @@ from fastapi.templating import Jinja2Templates
 
 from controlflow_sdk.store import repo
 from controlflow_sdk.store.db import connect
+
+# ---- data-file versioning helpers -----------------------------------------
+# Refreshing a source's data never destroys the old file: the prior file is
+# copied into data/.versions/<id>/ before being overwritten, and uploads awaiting
+# the user's explicit confirmation are staged under data/.pending/<id>/. Both live
+# under nested dirs so the top-level data/*.csv glob (import/load_demo) ignores them.
+
+def _archive_dir(root: Path, sid: str) -> Path:
+    return root / "data" / ".versions" / sid
+
+
+def _pending_dir(root: Path, sid: str) -> Path:
+    return root / "data" / ".pending" / sid
+
+
+def _header_of(raw: bytes) -> list[str]:
+    return next(csvmod.reader(io.StringIO(raw.decode("utf-8-sig"))), [])
+
+
+def _stamp() -> str:
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _fmt_stamp(stamp: str) -> str:
+    try:
+        return datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%d %H:%M UTC")
+    except ValueError:
+        return stamp
+
+
+def _list_versions(root: Path, sid: str) -> list[dict[str, str]]:
+    d = _archive_dir(root, sid)
+    if not d.is_dir():
+        return []
+    out: list[dict[str, str]] = []
+    for p in sorted(d.iterdir(), reverse=True):  # filename stamps sort newest-first
+        if not p.is_file():
+            continue
+        stamp, _, name = p.name.partition("__")
+        out.append({"file": p.name, "name": name or p.name, "label": _fmt_stamp(stamp)})
+    return out
+
+
+def _reconcile_columns(
+    existing: list[dict[str, Any]], new_headers: list[str]
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    """Preserve mappings for surviving columns, default new ones, drop missing ones."""
+    by_name = {c["original_name"]: c for c in existing}
+    reconciled: list[dict[str, Any]] = []
+    for i, h in enumerate(new_headers):
+        if h in by_name:
+            col = dict(by_name[h])
+            col["ordinal"] = i
+        else:
+            col = {"original_name": h, "display_name": h, "data_type": "text",
+                   "is_key": False, "include": True, "ordinal": i}
+        reconciled.append(col)
+    added = [h for h in new_headers if h not in by_name]
+    removed = [c["original_name"] for c in existing if c["original_name"] not in new_headers]
+    return reconciled, added, removed
 
 
 def register(
@@ -28,6 +90,17 @@ def register(
             request,
             "sources.html",
             {"project": repo.get_project(conn) or {"name": ""}, "sources": repo.list_sources(conn)},
+        )
+
+    @app.get("/sources/new", response_class=HTMLResponse)
+    def new_source(
+        request: Request,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> Any:
+        return templates.TemplateResponse(
+            request,
+            "source_new.html",
+            {"project": repo.get_project(conn) or {"name": ""}},
         )
 
     @app.post("/sources")
@@ -62,11 +135,13 @@ def register(
         request: Request,
         conn: sqlite3.Connection = Depends(get_conn),
     ) -> Any:
+        root = request.app.state.project_root
         return templates.TemplateResponse(
             request,
             "source_edit.html",
             {"project": repo.get_project(conn) or {"name": ""},
-             "source": repo.get_source(conn, source_id)},
+             "source": repo.get_source(conn, source_id),
+             "versions": _list_versions(root, source_id)},
         )
 
     @app.post("/sources/{source_id}")
@@ -104,8 +179,118 @@ def register(
                 key_config = {"mode": "composite", "columns": key_columns}
             else:
                 key_config = {"mode": "auto"}
-            repo.upsert_source(conn, id=source_id, format=existing["format"],
-                               path=existing["path"], key_config=key_config)
+
+            def _field(name: str) -> str | None:
+                return str(form.get(name, "")).strip() or None
+
+            repo.upsert_source(
+                conn, id=source_id, format=existing["format"],
+                path=existing["path"], key_config=key_config,
+                title=_field("title"),
+                description=_field("description"),
+                # Not exposed in the editor form — preserve the imported value.
+                completeness_accuracy=existing.get("completeness_accuracy"),
+                extract_date=_field("extract_date"),
+            )
         finally:
             conn.close()
         return RedirectResponse("/sources", status_code=303)
+
+    @app.post("/sources/{source_id}/refresh")
+    async def refresh_source(
+        source_id: str,
+        request: Request,
+        file: UploadFile = File(...),
+    ) -> Any:
+        """Stage a new data file and show a confirm page with the column diff."""
+        root = request.app.state.project_root
+        conn = connect(root)
+        try:
+            existing = repo.get_source(conn, source_id)
+            if existing is None:
+                return RedirectResponse("/sources", status_code=303)
+            raw = await file.read()
+            pdir = _pending_dir(root, source_id)
+            pdir.mkdir(parents=True, exist_ok=True)
+            pending_name = Path(file.filename or f"{source_id}.csv").name
+            (pdir / pending_name).write_bytes(raw)
+            new_headers = _header_of(raw)
+            _, added, removed = _reconcile_columns(existing["columns"], new_headers)
+            return templates.TemplateResponse(
+                request,
+                "source_refresh.html",
+                {"project": repo.get_project(conn) or {"name": ""},
+                 "source": existing, "pending": pending_name,
+                 "new_headers": new_headers, "added": added, "removed": removed},
+            )
+        finally:
+            conn.close()
+
+    @app.post("/sources/{source_id}/refresh/confirm")
+    async def confirm_refresh(
+        source_id: str,
+        request: Request,
+        pending: str = Form(...),
+    ) -> Any:
+        """Archive the current file, promote the staged file, reconcile columns."""
+        root = request.app.state.project_root
+        conn = connect(root)
+        try:
+            existing = repo.get_source(conn, source_id)
+            if existing is None:
+                return RedirectResponse("/sources", status_code=303)
+            pending_path = _pending_dir(root, source_id) / Path(pending).name
+            if not pending_path.is_file():
+                return RedirectResponse(f"/sources/{source_id}", status_code=303)
+            new_bytes = pending_path.read_bytes()
+
+            current_path = root / existing["path"]
+            if current_path.is_file():  # never overwrite without keeping the old file
+                adir = _archive_dir(root, source_id)
+                adir.mkdir(parents=True, exist_ok=True)
+                (adir / f"{_stamp()}__{current_path.name}").write_bytes(
+                    current_path.read_bytes()
+                )
+            current_path.parent.mkdir(parents=True, exist_ok=True)
+            current_path.write_bytes(new_bytes)  # path stays stable across refreshes
+            pending_path.unlink()
+
+            reconciled, _, removed = _reconcile_columns(
+                existing["columns"], _header_of(new_bytes)
+            )
+            repo.set_columns(conn, source_id, reconciled)
+
+            # Drop any dropped column from the key config so it can't dangle.
+            key_cols = [c for c in (existing.get("key_config") or {}).get("columns", [])
+                        if c not in removed]
+            if len(key_cols) == 1:
+                key_config: dict[str, Any] = {"mode": "single", "columns": key_cols}
+            elif key_cols:
+                key_config = {"mode": "composite", "columns": key_cols}
+            else:
+                key_config = {"mode": "auto"}
+
+            repo.upsert_source(
+                conn, id=source_id, format=existing["format"],
+                path=existing["path"], key_config=key_config,
+                title=existing.get("title"), description=existing.get("description"),
+                completeness_accuracy=existing.get("completeness_accuracy"),
+                extract_date=existing.get("extract_date"),
+            )
+            return RedirectResponse(f"/sources/{source_id}", status_code=303)
+        finally:
+            conn.close()
+
+    @app.post("/sources/{source_id}/refresh/cancel")
+    async def cancel_refresh(
+        source_id: str,
+        request: Request,
+        pending: str = Form(""),
+    ) -> Any:
+        """Discard a staged file without touching the current data."""
+        root = request.app.state.project_root
+        if pending:
+            p = _pending_dir(root, source_id) / Path(pending).name
+            if p.is_file():
+                p.unlink()
+        return RedirectResponse(f"/sources/{source_id}", status_code=303)

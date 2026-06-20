@@ -40,21 +40,22 @@ def get_project(conn: sqlite3.Connection) -> dict | None:
 # ---- sources + columns -----------------------------------------------------
 def upsert_source(
     conn: sqlite3.Connection, *, id: str, format: str, path: str,
-    key_config: dict, description: str | None = None,
+    key_config: dict, title: str | None = None, description: str | None = None,
     completeness_accuracy: str | None = None, extract_date: str | None = None,
     created_at: str = "",
 ) -> None:
     conn.execute(
         """INSERT INTO sources
-             (id, format, path, key_config, description,
+             (id, format, path, key_config, title, description,
               completeness_accuracy, extract_date, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              format=excluded.format, path=excluded.path,
-             key_config=excluded.key_config, description=excluded.description,
+             key_config=excluded.key_config, title=excluded.title,
+             description=excluded.description,
              completeness_accuracy=excluded.completeness_accuracy,
              extract_date=excluded.extract_date""",
-        (id, format, path, json.dumps(key_config), description,
+        (id, format, path, json.dumps(key_config), title, description,
          completeness_accuracy, extract_date, created_at),
     )
     conn.commit()

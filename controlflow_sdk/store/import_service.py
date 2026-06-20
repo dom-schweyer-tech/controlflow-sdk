@@ -47,6 +47,7 @@ def import_project(conn: sqlite3.Connection, src: Path) -> tuple[int, int]:
             format=binding.config.get("format", "csv"),
             path=binding.config.get("path", ""),
             key_config=binding.key_config,
+            title=binding.title,
             description=binding.description,
             completeness_accuracy=binding.completeness_accuracy,
             extract_date=binding.extract_date,

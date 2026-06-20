@@ -192,6 +192,13 @@ legend {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 0; font-size: 13px; color: var(--text-primary); cursor: pointer;
 }
+.check-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.check-row label { flex: 1; min-width: 0; padding: 8px 0; }
+.check-row .src-name { font-weight: 500; }
+.check-row .mono.muted { font-size: 12px; }
+.check-row + .check-row { border-top: 1px solid var(--border-subtle, var(--border-default)); }
 .radio-row { display: flex; gap: 20px; }
 .radio-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
 
@@ -208,10 +215,10 @@ legend {
   background: var(--accent-primary); border-color: var(--accent-primary); color: #fff;
 }
 .btn-primary:hover, button[type="submit"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
-.btn-ghost {
+.btn-ghost, button.btn-ghost {
   background: transparent; border-color: var(--border-strong); color: var(--text-secondary);
 }
-.btn-ghost:hover { background: var(--bg-surface-2); color: var(--text-primary); }
+.btn-ghost:hover, button.btn-ghost:hover { background: var(--bg-surface-2); color: var(--text-primary); }
 .btn-sm { padding: 5px 12px; font-size: 12px; }
 .btn-add {
   background: transparent; border: 1px dashed var(--border-strong); color: var(--text-secondary);
@@ -298,3 +305,7 @@ legend {
 .setup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
 .setup-grid .card { margin-bottom: 0; }
 .setup-grid datalist { display: none; }
+
+/* ── source data-file versioning ──────────────────────────────────────────── */
+.version-list, .diff-list { margin: 8px 0 0; padding-left: 18px; }
+.version-list li, .diff-list li { margin: 4px 0; }
