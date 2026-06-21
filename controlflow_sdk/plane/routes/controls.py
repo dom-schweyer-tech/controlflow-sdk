@@ -204,6 +204,23 @@ def _pipeline_from_form(form: Any) -> dict[str, Any] | None:
     return graph if isinstance(graph, dict) else None
 
 
+def _other_source_ids(pipeline: Any) -> list[str]:
+    """Source ids referenced by cross-source conditions (exists_in/not_exists_in).
+
+    Walks every node's ``config.conditions`` list and collects unique
+    ``other_source`` values so they can be unioned into the control's bound
+    ``source_ids`` alongside the Import-node sources.  Preserves insertion order
+    and skips duplicates and empty strings.
+    """
+    out: list[str] = []
+    for node in pipeline.nodes:
+        for cond in node.config.get("conditions", []):
+            other = cond.get("other_source", "")
+            if other and other not in out:
+                out.append(other)
+    return out
+
+
 def _save_pipeline_graph(
     conn: sqlite3.Connection, control_id: str, graph: dict[str, Any]
 ) -> list[str]:
@@ -214,6 +231,18 @@ def _save_pipeline_graph(
     change). Returns a list of errors (id-prefixed for lint failures so the
     editor can pin them per-node) — ``[]`` on success. Nothing is persisted when
     there are errors, mirroring the create/update guardrail (§8 layer 1).
+
+    Source binding is derived from TWO sources:
+
+    1. Import nodes (``parsed.import_source_ids()``) — the primary population(s).
+    2. ``other_source`` values in any node's ``config.conditions`` — the reference
+       sets for ``exists_in`` / ``not_exists_in`` cross-source conditions.
+
+    Both are unioned (Import sources first; extra ``other_source`` values appended
+    in the order they appear) so the runner can load them all.  Pre-fix, only (1)
+    was collected, causing ``ValueError: exists_in references unknown source`` at
+    run time for single-Import pipelines whose Test node used a second source via
+    ``not_exists_in`` (T6/T7 regression, issue #25).
     """
     from controlflow_sdk.pipeline.compile import compile_pipeline
     from controlflow_sdk.pipeline.lint import lint_pipeline
@@ -246,7 +275,12 @@ def _save_pipeline_graph(
         failure_threshold_pct=control["failure_threshold_pct"],
         failure_threshold_count=control["failure_threshold_count"],
     )
-    repo.set_control_sources(conn, control["id"], parsed.import_source_ids())
+    # Union Import-node sources (primary) with other_source values from
+    # cross-source conditions — Import sources come first (they are the primary
+    # population), then any extra other_source not already present.
+    import_ids = parsed.import_source_ids()
+    extra_ids = [sid for sid in _other_source_ids(parsed) if sid not in import_ids]
+    repo.set_control_sources(conn, control["id"], import_ids + extra_ids)
     return []
 
 
