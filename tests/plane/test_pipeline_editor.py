@@ -104,29 +104,32 @@ def test_pipeline_tab_renders_cards_and_diagram(client):
     _make_control(client, "C1")
     assert _save_pipeline(client, "C1", _terminated_access_graph()).status_code in (302, 303)
 
-    resp = client.get("/controls/C1/pipeline")
-    assert resp.status_code == 200
-    body = resp.text
+    # Builder pane: node cards (the /pipeline redirect lands here).
+    builder_body = client.get("/controls/C1/logic/builder").text
     # A card per node (id surfaced) + the typed kind chip.
     for nid in ("acc", "active", "emp", "term", "join", "tst"):
-        assert f'data-node="{nid}"' in body
+        assert f'data-node="{nid}"' in builder_body
     # Join card names BOTH input streams (fan-in by id, not drawn wires).
-    assert "Left input" in body and "Right input" in body
-    # The generated SVG flowchart is server-rendered.
-    assert "Pipeline flowchart" in body and "<svg" in body
+    assert "Left input" in builder_body and "Right input" in builder_body
+
+    # Flowchart pane: the generated SVG (now lives on its own tab).
+    fc_body = client.get("/controls/C1/logic/flowchart").text
+    assert "Pipeline flowchart" in fc_body and "<svg" in fc_body
     # Multi-lane layout: the Join's two feeder branches sit in SEPARATE columns
     # that converge at the Join. The flowchart positions the two import roots at
     # DIFFERENT x coordinates (distinct lanes), so the join no longer reads as a
     # single linear chain. Guards the multi-lane layout regression.
-    rect_xs = [int(m) for m in re.findall(r'<rect x="(\d+)"', body)]
+    rect_xs = [int(m) for m in re.findall(r'<rect x="(\d+)"', fc_body)]
     assert len(set(rect_xs)) >= 2, f"expected >=2 distinct lanes, got xs={rect_xs}"
     # At least one fan-in edge crosses lanes: it converges from a branch column
     # into the spine, drawn as an S-curve (presentation-only — execution order is
     # unchanged and still topological).
-    assert re.search(r'class="fc-edge"[^>]*d="M[^"]* C ', body)
-    # The read-only generated-Python glass-box + the convert offramp.
-    assert "Generated Python" in body
-    assert "Convert to Python test" in body
+    assert re.search(r'class="fc-edge"[^>]*d="M[^"]* C ', fc_body)
+    # The read-only generated-Python glass-box + the convert offramp live on the
+    # python tab; verify via the old control_pipeline template still served there.
+    py_body = client.get("/controls/C1/logic/python").text
+    assert "Generated Python" in py_body
+    assert "Convert to Python test" in py_body
 
 
 def test_pipeline_editor_shows_live_row_counts(client):
@@ -377,3 +380,54 @@ def test_old_pipeline_url_redirects(client, seeded_pipeline_control):
 def test_control_tab_says_logic_not_pipeline(client, seeded_pipeline_control):
     r = client.get(f"/controls/{seeded_pipeline_control}/logic/builder")
     assert ">Logic<" in r.text and ">Pipeline<" not in r.text
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Split Builder / Flowchart panes; Builder derives graph
+# ---------------------------------------------------------------------------
+
+def _make_rule_control(client) -> str:
+    """Create a control with a rule_spec (no pipeline) and a bound source."""
+    _make_source(client, "rc_accounts", b"account_id,is_active\nA1,true\nA2,false\n")
+    cid = "RC1"
+    client.post("/controls", data={
+        "id": cid, "title": "Rule Control", "objective": "o", "narrative": "n",
+        "test_kind": "rule", "rule_logic": "all",
+        "source_ids": "rc_accounts",
+    }, follow_redirects=False)
+    return cid
+
+
+def _make_raw_python_control(client) -> str:
+    """Create a control that has hand-written test_code and no pipeline/rule_spec."""
+    _make_source(client, "rp_accounts", b"account_id,amount\nA1,100\n")
+    cid = "RP1"
+    client.post("/controls", data={
+        "id": cid, "title": "Raw Python Control", "objective": "o", "narrative": "n",
+        "test_kind": "python",
+        "test_code": "def test(pop, sources):\n    return []\n",
+        "source_ids": "rp_accounts",
+    }, follow_redirects=False)
+    return cid
+
+
+def test_builder_shows_nodes_for_rule_control(client):
+    cid = _make_rule_control(client)
+    r = client.get(f"/controls/{cid}/logic/builder")
+    assert r.status_code == 200
+    assert "Import" in r.text and "Test" in r.text          # derived 2-node graph
+    assert "Generated Python" not in r.text                 # python moved to its own tab
+
+
+def test_flowchart_tab_has_svg_only(client, seeded_pipeline_control):
+    r = client.get(f"/controls/{seeded_pipeline_control}/logic/flowchart")
+    assert r.status_code == 200
+    assert "<svg" in r.text
+    assert "+ Import" not in r.text                         # no builder toolbar here
+
+
+def test_builder_shows_python_notice_for_raw_python(client):
+    cid = _make_raw_python_control(client)
+    r = client.get(f"/controls/{cid}/logic/builder")
+    assert r.status_code == 200
+    assert "authored directly in Python" in r.text
