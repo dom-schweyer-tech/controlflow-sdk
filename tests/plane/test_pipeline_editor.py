@@ -415,8 +415,52 @@ def test_builder_shows_nodes_for_rule_control(client):
     cid = _make_rule_control(client)
     r = client.get(f"/controls/{cid}/logic/builder")
     assert r.status_code == 200
-    assert "Import" in r.text and "Test" in r.text          # derived 2-node graph
+    # Assert the DERIVED node cards actually rendered (data-type attribute on the
+    # card elements), not just text that also appears in the toolbar buttons.
+    assert 'data-type="import"' in r.text, "derived Import node card missing"
+    assert 'data-type="test"' in r.text, "derived Test node card missing"
     assert "Generated Python" not in r.text                 # python moved to its own tab
+
+
+def test_builder_derives_graph_for_rule_control_and_save_persists(client):
+    """Regression: opening Builder on a rule_spec control, then POSTing the derived
+    graph must persist a pipeline (not silently discard it).  Before the fix the
+    hidden pipeline_json was initialised from the empty stored graph so the derived
+    scaffold nodes were never submitted."""
+    cid = _make_rule_control(client)
+
+    # 1. GET the builder — it renders derived Import→Test nodes.
+    r = client.get(f"/controls/{cid}/logic/builder")
+    assert r.status_code == 200
+    assert 'data-type="import"' in r.text and 'data-type="test"' in r.text
+
+    # 2. Extract the derived graph from the embedded JSON blob (what the JS would
+    #    read and submit on form submit / node-add).
+    import re as _re
+    m = _re.search(
+        r'<script id="graph-data"[^>]*>(.*?)</script>', r.text, _re.DOTALL
+    )
+    assert m, "graph-data script tag not found in builder HTML"
+    derived_graph = json.loads(m.group(1).strip())
+    assert derived_graph.get("nodes"), "derived graph has no nodes"
+    # The derived graph must have an import and a test node (not be empty).
+    node_types = {n["type"] for n in derived_graph["nodes"]}
+    assert "import" in node_types and "test" in node_types
+
+    # 3. POST that graph as the browser JS would after serialising the DOM cards.
+    resp = _save_pipeline(client, cid, derived_graph)
+    assert resp.status_code in (302, 303), f"save returned {resp.status_code}"
+
+    # 4. The control must now have a persisted pipeline (not None).
+    from controlflow_sdk.store import repo
+    conn = _conn(client)
+    c = repo.get_control(conn, cid)
+    conn.close()
+    assert c["pipeline"] is not None, "pipeline was not persisted after save"
+    # And it must still compile to a rule_spec or test_code (cardinal rule 0001).
+    assert c["rule_spec"] is not None or c["test_code"] is not None, (
+        "control has a pipeline but neither rule_spec nor test_code — bundle broken"
+    )
 
 
 def test_flowchart_tab_has_svg_only(client, seeded_pipeline_control):

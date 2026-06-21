@@ -378,9 +378,10 @@ def _editor_context(
             if builder_parsed is not None
             else [_raw_card_vm(n, node_errors or {}) for n in builder_graph.get("nodes", [])]
         )
-        # The form submits against the stored graph (so a save is always based on
-        # what's actually persisted, not the ephemeral derived scaffold).
-        builder_graph_json = json.dumps(graph)
+        # The form must submit the DERIVED graph (the one the cards were rendered
+        # from), not the stored graph — the stored graph may be empty/absent for a
+        # rule_spec or fresh control, so submitting it would silently discard edits.
+        builder_graph_json = json.dumps(builder_graph)
     else:
         # Order the raw node dicts topologically for the cards (falls back to
         # as-stored when the graph can't be parsed yet).
