@@ -845,3 +845,153 @@ def test_forked_control_bundle_has_n_procedures(client):
     for p in procs:
         assert p["test_code"], f"procedure {p['title']!r}: test_code is empty"
         assert "result" in p, f"procedure {p['title']!r}: missing result"
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Builder UI — Test-card fields + relaxed save + all-terminals
+# ---------------------------------------------------------------------------
+
+def _forked_graph_with_titles() -> dict:
+    """A forked 2-terminal graph where each Test node has config.title + thresholds."""
+    return {
+        "nodes": [
+            {"id": "imp", "type": "import", "source_id": "fork_src", "narrative": ""},
+            {
+                "id": "a", "type": "test", "inputs": ["imp"], "narrative": "",
+                "config": {
+                    "logic": "all",
+                    "severity": "high",
+                    "item_key_column": "item_id",
+                    "description_template": "Item {item_id} high",
+                    "conditions": [{"column": "category", "op": "eq", "value": "high"}],
+                    "title": "High-value items",
+                    "failure_threshold_pct": 5.0,
+                    "failure_threshold_count": 10,
+                },
+            },
+            {
+                "id": "b", "type": "test", "inputs": ["imp"], "narrative": "",
+                "config": {
+                    "logic": "all",
+                    "severity": "medium",
+                    "item_key_column": "item_id",
+                    "description_template": "Item {item_id} low",
+                    "conditions": [{"column": "category", "op": "eq", "value": "low"}],
+                    "title": "Low-value items",
+                    "failure_threshold_pct": 2.5,
+                    "failure_threshold_count": 0,
+                },
+            },
+        ]
+    }
+
+
+def _seed_forked_t8(client):
+    _make_source(client, "fork_src",
+                 b"item_id,category\nI1,low\nI2,high\nI3,normal\n")
+    _make_control(client, "T8")
+
+
+def test_forked_builder_renders_both_test_cards_with_proc_title_and_threshold_fields(client):
+    """GET /controls/T8/logic/builder for a forked 2-terminal control must:
+    - render BOTH Test cards (data-node="a" and data-node="b")
+    - each Test card must carry data-proc-title, data-threshold-pct, data-threshold-count inputs
+    """
+    _seed_forked_t8(client)
+    graph = _forked_graph_with_titles()
+    r = _save_pipeline(client, "T8", graph)
+    assert r.status_code in (302, 303), f"save failed: {r.status_code}"
+
+    builder_r = client.get("/controls/T8/logic/builder")
+    assert builder_r.status_code == 200
+    html = builder_r.text
+
+    # Both Test cards rendered.
+    assert 'data-node="a"' in html, "Test card 'a' not found in builder"
+    assert 'data-node="b"' in html, "Test card 'b' not found in builder"
+
+    # Both cards have the new procedure-title and threshold inputs.
+    assert "data-proc-title" in html, "data-proc-title attribute missing from Test card"
+    assert "data-threshold-pct" in html, "data-threshold-pct attribute missing from Test card"
+    assert "data-threshold-count" in html, "data-threshold-count attribute missing from Test card"
+
+    # Saved titles round-trip back into the rendered value attributes.
+    assert 'value="High-value items"' in html, "Procedure title 'High-value items' not rendered"
+    assert 'value="Low-value items"' in html, "Procedure title 'Low-value items' not rendered"
+
+
+def test_forked_builder_post_saves_and_roundtrips_titles(client):
+    """POST a forked graph with config.title + thresholds → 303 (not 422);
+    GET back → both titles visible in builder HTML."""
+    _seed_forked_t8(client)
+    graph = _forked_graph_with_titles()
+
+    r = _save_pipeline(client, "T8", graph)
+    assert r.status_code in (302, 303), f"expected 303, got {r.status_code}: {r.text[:400]}"
+
+    html = client.get("/controls/T8/logic/builder").text
+    assert "High-value items" in html, "Title 'High-value items' missing after save"
+    assert "Low-value items" in html, "Title 'Low-value items' missing after save"
+
+
+def test_diagram_marks_all_terminals_for_forked_control():
+    """_diagram must mark BOTH terminal Test boxes terminal=True for a forked pipeline.
+
+    Before the fix _diagram used ``n.id == pipeline.terminal.id`` (only terminals[0]).
+    After the fix it uses ``n.id in {t.id for t in pipeline.terminals}`` so ALL
+    terminal boxes are marked.
+    """
+    from controlflow_sdk.pipeline.model import parse_pipeline
+    from controlflow_sdk.plane.routes.pipeline import _diagram
+
+    graph = _forked_graph_with_titles()
+    pipeline = parse_pipeline(graph)
+
+    # Sanity: both "a" and "b" are terminals.
+    assert len(pipeline.terminals) == 2
+    terminal_ids = {t.id for t in pipeline.terminals}
+    assert "a" in terminal_ids and "b" in terminal_ids
+
+    diagram = _diagram(pipeline, counts={})
+    terminal_boxes = [b for b in diagram["boxes"] if b["terminal"]]
+    terminal_box_ids = {b["id"] for b in terminal_boxes}
+
+    assert len(terminal_boxes) == 2, (
+        f"expected 2 terminal boxes, got {len(terminal_boxes)}: {terminal_box_ids}"
+    )
+    assert terminal_box_ids == {"a", "b"}, (
+        f"wrong terminal boxes: {terminal_box_ids}"
+    )
+
+
+def test_single_terminal_back_compat(client):
+    """Single-terminal controls still work after the Task 8 changes.
+
+    The new title/threshold inputs appear but are empty; saving without them
+    must succeed (no 422), and the pipeline persists correctly.
+    """
+    _make_source(client, "bt_items", b"item_id,flag\nI1,yes\nI2,no\n")
+    _make_control(client, "BT1")
+    graph = {"nodes": [
+        {"id": "imp", "type": "import", "source_id": "bt_items"},
+        {"id": "tst", "type": "test", "inputs": ["imp"],
+         "config": {"logic": "all", "severity": "high", "item_key_column": "item_id",
+                    "description_template": "Item {item_id}",
+                    "conditions": [{"column": "flag", "op": "eq", "value": "yes"}]}},
+    ]}
+    r = _save_pipeline(client, "BT1", graph)
+    assert r.status_code in (302, 303), f"single-terminal save failed: {r.status_code}"
+
+    # The builder must render with the new inputs present (but empty).
+    html = client.get("/controls/BT1/logic/builder").text
+    assert "data-proc-title" in html, "data-proc-title missing on single-terminal card"
+    assert "data-threshold-pct" in html, "data-threshold-pct missing on single-terminal card"
+    assert "data-threshold-count" in html, "data-threshold-count missing on single-terminal card"
+
+    # The flowchart marks the single terminal correctly.
+    from controlflow_sdk.pipeline.model import parse_pipeline
+    from controlflow_sdk.plane.routes.pipeline import _diagram
+    pipeline = parse_pipeline(graph)
+    diagram = _diagram(pipeline, counts={})
+    terminal_boxes = [b for b in diagram["boxes"] if b["terminal"]]
+    assert len(terminal_boxes) == 1 and terminal_boxes[0]["id"] == "tst"
