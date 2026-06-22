@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import zipfile
 
 import pytest
 
@@ -752,3 +753,95 @@ def test_python_save_works_for_raw_python_control(client):
     assert c["test_code"] == new_code, "test_code was not saved for a raw-python control"
     assert c["pipeline"] is None
     assert c["rule_spec"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task 7: Bundle — N procedures for forked controls
+# ---------------------------------------------------------------------------
+
+def _seed_forked_bundle_control(client):
+    """Seed a forked 2-terminal pipeline control, run it, return the control id.
+
+    Two terminal Test nodes share one Import:
+    - Terminal "a" ("High-value items"):  flags items with category == "high"
+    - Terminal "b" ("Low-value items"):   flags items with category == "low"
+    """
+    _make_source(client, "bundle_inv",
+                 b"item_id,category\nI1,low\nI2,low\nI3,high\nI4,normal\n")
+    cid = "FORK1"
+    _make_control(client, cid)
+
+    graph = {"nodes": [
+        {"id": "imp", "type": "import", "source_id": "bundle_inv"},
+        {
+            "id": "a", "type": "test", "inputs": ["imp"],
+            "config": {
+                "logic": "all",
+                "conditions": [{"column": "category", "op": "eq", "value": "high"}],
+                "severity": "high",
+                "description_template": "Item {item_id} is high-value",
+                "item_key_column": "item_id",
+                "title": "High-value items",
+            },
+        },
+        {
+            "id": "b", "type": "test", "inputs": ["imp"],
+            "config": {
+                "logic": "all",
+                "conditions": [{"column": "category", "op": "eq", "value": "low"}],
+                "severity": "medium",
+                "description_template": "Item {item_id} is low-value",
+                "item_key_column": "item_id",
+                "title": "Low-value items",
+            },
+        },
+    ]}
+    r = _save_pipeline(client, cid, graph)
+    assert r.status_code in (302, 303), f"save pipeline failed: {r.status_code}"
+    r2 = client.post(f"/controls/{cid}/run", follow_redirects=False)
+    assert r2.status_code in (302, 303), f"run failed: {r2.status_code}"
+    return cid
+
+
+def test_forked_control_bundle_has_n_procedures(client):
+    """A forked 2-terminal pipeline control must export with 2 workpaper procedures.
+
+    Asserts (per task-7-brief):
+    - manifest["schema_version"] == "1.0"
+    - validate_bundle(manifest) == []           (contract gate — schema 1.0 intact)
+    - workpaper["procedures"] has length 2
+    - The two procedure titles are distinct
+    - control["test_code"] is non-empty (the union test())
+    """
+    from controlflow_sdk.schema.validate import validate_bundle
+
+    _seed_forked_bundle_control(client)
+
+    resp = client.post("/export", follow_redirects=False)
+    assert resp.status_code == 200, f"export failed: {resp.status_code}"
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+
+    assert manifest["schema_version"] == "1.0"
+    assert validate_bundle(manifest) == [], f"schema errors: {validate_bundle(manifest)}"
+
+    ctrl = next(c for c in manifest["controls"] if c["id"] == "FORK1")
+
+    # The union test() must be non-empty and be Python (it concatenates branches).
+    assert ctrl["test_code"], "control test_code is empty — union test() missing"
+    assert "def test(" in ctrl["test_code"], "test_code does not look like a test() function"
+
+    procs = ctrl["workpaper"]["procedures"]
+    assert len(procs) == 2, (
+        f"expected 2 workpaper procedures for a forked control, got {len(procs)}. "
+        f"Titles: {[p.get('title') for p in procs]}"
+    )
+
+    titles = [p["title"] for p in procs]
+    assert len(set(titles)) == 2, f"procedure titles are not distinct: {titles}"
+
+    # Each procedure must have non-empty test_code and a result.
+    for p in procs:
+        assert p["test_code"], f"procedure {p['title']!r}: test_code is empty"
+        assert "result" in p, f"procedure {p['title']!r}: missing result"
