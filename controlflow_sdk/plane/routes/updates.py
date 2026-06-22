@@ -18,7 +18,9 @@ from fastapi.templating import Jinja2Templates
 from controlflow_sdk.store import repo
 from controlflow_sdk.store.db import connect
 from controlflow_sdk.upgrade.check import check_for_update, current_version
-from controlflow_sdk.upgrade.detect import InstallMethod, detect_install
+from controlflow_sdk.upgrade.command import build_upgrade_command
+from controlflow_sdk.upgrade.detect import InstallMethod, detect_install, source_dir
+from controlflow_sdk.upgrade.spawn import schedule_shutdown, spawn_detached_upgrade
 
 
 def register(
@@ -64,3 +66,35 @@ def register(
         return templates.TemplateResponse(
             request, "partials/update_result.html", {"info": info}
         )
+
+    @app.get("/updates/badge", response_class=HTMLResponse)
+    def update_badge(
+        request: Request,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> Any:
+        # OFF → zero egress, no badge.
+        if not repo.get_check_updates_on_launch(conn):
+            return HTMLResponse("")
+        info = getattr(request.app.state, "update_check", None)
+        if info is None:
+            info = check_for_update(detect_install())
+            request.app.state.update_check = info
+        if not info.available:
+            return HTMLResponse("")
+        return templates.TemplateResponse(
+            request, "partials/update_badge.html", {"info": info}
+        )
+
+    @app.post("/upgrade", response_class=HTMLResponse)
+    def do_upgrade(request: Request) -> Any:
+        method = detect_install()
+        current = current_version()
+        if method is InstallMethod.UNKNOWN:
+            return templates.TemplateResponse(
+                request, "upgrade_unavailable.html", {"current": current}
+            )
+        src = source_dir() if method is InstallMethod.GIT_EDITABLE else None
+        commands = build_upgrade_command(method, source_dir=str(src) if src else None)
+        spawn_detached_upgrade(request.app.state.project_root, commands, current=current)
+        schedule_shutdown()
+        return templates.TemplateResponse(request, "upgrading.html", {"current": current})
