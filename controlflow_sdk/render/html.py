@@ -938,6 +938,16 @@ def _emit_procedures(emit, wp: Workpaper) -> None:
             f'Pass Rate <span class="mono">{_e(run.pass_rate)}%</span></p>'
         )
 
+        # per-procedure verdict pill — only for N>1 (N==1 is byte-identical to today)
+        if len(wp.procedures) > 1:
+            det = proc.determination
+            pill_cls = "ok" if det.passed else "bad"
+            threshold_text, result_text = det.conclusion_text()
+            emit(
+                f'<p><span class="pill {pill_cls}">{_e(det.verdict)}</span> '
+                f'<span class="muted">{_e(threshold_text)} {_e(result_text)}</span></p>'
+            )
+
         # per-procedure violations table
         if run.violations:
             emit("<table>")
