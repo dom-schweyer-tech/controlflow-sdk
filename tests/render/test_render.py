@@ -310,12 +310,26 @@ class TestRenderHtml:
 
 
 def _make_two_procedure_workpaper() -> Workpaper:
-    """A 2-procedure workpaper: P1 passes (0 violations), P2 fails (1 violation)."""
-    from controlflow_sdk.model.control import Threshold
-    from controlflow_sdk.model.workpaper import Workpaper
+    """A 2-procedure workpaper built via the real ``Workpaper.assemble_procedures`` factory.
 
-    # Minimal stub ControlDef-alike — use assemble_procedures which takes a ControlDef.
-    # Build directly to avoid needing a real ControlDef on disk.
+    P1 passes (0 violations, zero-tolerance threshold); P2 fails (1 violation,
+    zero-tolerance threshold).  Uses the genuine factory path — the same one
+    Task 4's run service drives — so the renderer gets real per-procedure
+    determinations.
+    """
+    from controlflow_sdk.model.control import ControlDef, FrameworkRefs, Threshold
+    from controlflow_sdk.model.workpaper import ProcedureSpec, Workpaper
+
+    control = ControlDef(
+        id="ctrl-mp",
+        title="Multi-Procedure Control",
+        objective="Ensure items comply with both checks.",
+        narrative="Finance team.",
+        framework_refs=FrameworkRefs(nist=[], extra={}),
+        risk=None,
+        sources=[],
+    )
+
     prov = SourceProvenance(
         source_id="src-1",
         path="/data/invoices.csv",
@@ -342,30 +356,23 @@ def _make_two_procedure_workpaper() -> Workpaper:
         ],
         provenance=[prov],
     )
-    from controlflow_sdk.model.workpaper import Procedure
-
-    proc_pass = Procedure(
+    spec_pass = ProcedureSpec(
         title="Approval Check",
         narrative="All items require approval.",
         test_code="result = df[df['approved'] == False]",
-        result=run_pass,
         threshold=Threshold(),
     )
-    proc_fail = Procedure(
+    spec_fail = ProcedureSpec(
         title="Amount Limit Check",
         narrative="No item may exceed the limit.",
         test_code="result = df[df['amount'] > 5000]",
-        result=run_fail,
         threshold=Threshold(),
     )
-    return Workpaper(
-        control_id="ctrl-mp",
-        title="Multi-Procedure Control",
-        objective="Ensure items comply with both checks.",
-        narrative="Finance team.",
-        framework_refs={"nist": [], "extra": {}},
-        procedures=[proc_pass, proc_fail],
+    return Workpaper.assemble_procedures(
+        control,
+        [(spec_pass, run_pass), (spec_fail, run_fail)],
         generated_at="2026-06-22T00:00:00Z",
+        data_samples=None,
     )
 
 
