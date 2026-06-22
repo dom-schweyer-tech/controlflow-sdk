@@ -117,7 +117,7 @@ None (initial release).
 2. **Group changes**: Use subheadings (`Added`, `Changed`, `Fixed`, `Deprecated`, `Removed`, `Security`)
 3. **Note schema changes**: If `schema_version` is incremented, explicitly call it out with migration details
 4. **Coordinate with app**: If schema changes, ensure ControlFlow docs are updated in sync
-5. **Keep unreleased section**: Always maintain an `## Unreleased` section for in-flight work
+5. **Keep unreleased section**: Always maintain an `## [Unreleased]` section for in-flight work
 
 ### Schema Version History
 
