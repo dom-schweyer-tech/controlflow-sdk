@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv as csvmod
-import io
 import sqlite3
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime
@@ -13,8 +11,15 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from controlflow_sdk.plane.coercion_check import coercion_report
+from controlflow_sdk.plane.ingest import AdaptersUnavailable, extract_table
 from controlflow_sdk.store import repo
 from controlflow_sdk.store.db import connect
+
+_UPLOAD_FORMATS = {".csv": "csv", ".xlsx": "xlsx", ".parquet": "parquet"}
+
+
+def _fmt_from_name(name: str) -> str | None:
+    return _UPLOAD_FORMATS.get(Path(name).suffix.lower())
 
 PAGE_SIZE = 50
 
@@ -28,8 +33,12 @@ def _pending_dir(root: Path, sid: str) -> Path:
     return root / "data" / ".pending" / sid
 
 
-def _header_of(raw: bytes) -> list[str]:
-    return next(csvmod.reader(io.StringIO(raw.decode("utf-8-sig"))), [])
+def _table_of(raw: bytes, fmt: str, sheet: str | None = None) -> Any:
+    return extract_table(raw, fmt, sheet=sheet)
+
+
+def _header_of(raw: bytes, fmt: str = "csv", sheet: str | None = None) -> list[str]:
+    return _table_of(raw, fmt, sheet).header
 
 
 def _stamp() -> str:
@@ -44,9 +53,8 @@ def _fmt_stamp(stamp: str) -> str:
         return stamp
 
 
-def _row_count(raw: bytes) -> int:
-    n = sum(1 for _ in csvmod.reader(io.StringIO(raw.decode("utf-8-sig"))))
-    return max(0, n - 1)  # exclude header
+def _row_count(raw: bytes, fmt: str = "csv", sheet: str | None = None) -> int:
+    return len(_table_of(raw, fmt, sheet).rows)
 
 
 def _reconcile_columns(
@@ -99,29 +107,49 @@ def register(
     async def create_source(
         request: Request,
         source_id: str = Form(...),
-        format: str = Form("csv"),
         as_of_date: str = Form(""),
+        sheet: str = Form(""),
         file: UploadFile = File(...),
     ) -> Any:
         root = request.app.state.project_root
+        filename = file.filename or f"{source_id}.csv"
+        fmt = _fmt_from_name(filename)
+        raw = await file.read()
+
+        def _err(msg: str) -> Any:
+            return templates.TemplateResponse(
+                request, "source_new.html",
+                {"project": {"name": ""}, "error": msg}, status_code=200,
+            )
+
+        if fmt is None:
+            return _err(
+                f"Unsupported file type for {filename!r}. "
+                "Upload a .csv, .xlsx, or .parquet file (legacy .xls is not supported)."
+            )
+        sheet_val = sheet.strip() or None
+        try:
+            table = extract_table(raw, fmt, sheet=sheet_val)
+        except AdaptersUnavailable as e:
+            return _err(str(e))
+
         conn = connect(root)
         try:
             (root / "data").mkdir(parents=True, exist_ok=True)
-            raw = await file.read()
-            dest = root / "data" / (file.filename or f"{source_id}.csv")
+            dest = root / "data" / Path(filename).name
             dest.write_bytes(raw)
-            header = next(csvmod.reader(io.StringIO(raw.decode("utf-8-sig"))), [])
-            repo.upsert_source(conn, id=source_id, format=format,
-                               path=f"data/{dest.name}", key_config={"mode": "auto"})
+            repo.upsert_source(conn, id=source_id, format=fmt,
+                               path=f"data/{dest.name}", key_config={"mode": "auto"},
+                               sheet=sheet_val)
             repo.set_columns(conn, source_id, [
                 {"original_name": h, "display_name": h, "data_type": "text",
                  "is_key": False, "include": True, "ordinal": i}
-                for i, h in enumerate(header)
+                for i, h in enumerate(table.header)
             ])
             repo.set_initial_file(
                 conn, source_id=source_id, stored_path=f"data/{dest.name}",
                 original_name=dest.name, as_of_date=as_of_date.strip() or None,
-                row_count=_row_count(raw), uploaded_at=_stamp(),
+                row_count=len(table.rows), uploaded_at=_stamp(),
             )
             if as_of_date.strip():
                 conn.execute("UPDATE sources SET extract_date = ? WHERE id = ?",
@@ -162,15 +190,14 @@ def register(
         if current:
             fpath = root / current["stored_path"]
             if fpath.is_file():
-                all_rows = list(
-                    csvmod.reader(io.StringIO(fpath.read_text(encoding="utf-8-sig")))
-                )
-                if all_rows:
-                    header, data_rows = all_rows[0], all_rows[1:]
-                    total = len(data_rows)
-                    page = max(1, page)
-                    start = (page - 1) * PAGE_SIZE
-                    rows = data_rows[start:start + PAGE_SIZE]
+                fmt = (source or {}).get("format", "csv")
+                sheet = (source or {}).get("sheet")
+                table = extract_table(fpath.read_bytes(), fmt, sheet=sheet)
+                header, data_rows = table.header, table.rows
+                total = len(data_rows)
+                page = max(1, page)
+                start = (page - 1) * PAGE_SIZE
+                rows = data_rows[start:start + PAGE_SIZE]
         page_count = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         # Coercion-health verdict computed over the FULL file (not the paginated
         # slice) so it stays honest even when page 1 happens to be clean (0004).
@@ -287,7 +314,7 @@ def register(
             pdir.mkdir(parents=True, exist_ok=True)
             pending_name = Path(file.filename or f"{source_id}.csv").name
             (pdir / pending_name).write_bytes(raw)
-            new_headers = _header_of(raw)
+            new_headers = _header_of(raw, existing["format"], existing.get("sheet"))
             _, added, removed = _reconcile_columns(existing["columns"], new_headers)
             return templates.TemplateResponse(
                 request,
@@ -332,7 +359,8 @@ def register(
             pending_path.unlink()
 
             reconciled, _, removed = _reconcile_columns(
-                existing["columns"], _header_of(new_bytes)
+                existing["columns"],
+                _header_of(new_bytes, existing["format"], existing.get("sheet")),
             )
             repo.set_columns(conn, source_id, reconciled)
 
@@ -351,7 +379,8 @@ def register(
                 conn, source_id=source_id, stored_path=existing["path"],
                 original_name=Path(pending).name,
                 as_of_date=as_of_date.strip() or None,
-                row_count=_row_count(new_bytes), uploaded_at=stamp,
+                row_count=_row_count(new_bytes, existing["format"], existing.get("sheet")),
+                uploaded_at=stamp,
             )
 
             new_extract_date = as_of_date.strip() or existing.get("extract_date")

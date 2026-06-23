@@ -4,8 +4,9 @@
 <a class="crumb" href="/sources">← Sources</a>
 <div class="page-head">
   <h1>Add a data source</h1>
-  <p class="lead">Upload a CSV population. We'll detect its columns so you can map and describe them on the next screen. Source data stays local — it is never written to the export bundle.</p>
+  <p class="lead">Upload a population file. We'll detect its columns so you can map and describe them on the next screen. Source data stays local — it is never written to the export bundle.</p>
 </div>
+{% if error %}<div class="callout callout-warn">{{ error }}</div>{% endif %}
 
 <div class="card">
   <form method="post" action="/sources" enctype="multipart/form-data">
@@ -15,14 +16,14 @@
       <input id="s-id" type="text" name="source_id" placeholder="e.g. invoices" required>
     </div>
     <div class="field">
-      <label for="s-fmt">Format</label>
-      <select id="s-fmt" name="format">
-        <option value="csv">CSV</option>
-      </select>
+      <label for="s-file">File</label>
+      <span class="hint">CSV, Excel (.xlsx), or Parquet. Source data stays local — never written to the bundle.</span>
+      <input id="s-file" type="file" name="file" accept=".csv,.xlsx,.parquet" required>
     </div>
     <div class="field">
-      <label for="s-file">File</label>
-      <input id="s-file" type="file" name="file" accept=".csv" required>
+      <label for="s-sheet">Excel sheet (optional)</label>
+      <span class="hint">For multi-sheet .xlsx — leave blank for the first sheet.</span>
+      <input id="s-sheet" type="text" name="sheet" placeholder="e.g. Sheet1">
     </div>
     <div class="field">
       <label for="s-asof">Data as-of date</label>
