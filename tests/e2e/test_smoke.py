@@ -209,3 +209,16 @@ def test_author_run_export_smoke(page: Page, live_server: str, tmp_path: Path) -
     # the same validator the ControlFlow app vendors.
     assert validate_bundle(manifest) == []
     assert any(c["id"] == "sod" for c in manifest["controls"])
+
+
+@pytest.mark.browser
+def test_add_source_has_upload_and_url_modes(page: Page, live_server: str) -> None:
+    """Smoke-check that the add-source page shows both modes and the URL form's
+    secrets warning (learning 0012 — add-source form restructured in place with
+    upload/URL mode toggle + sheet field).
+    """
+    page.goto(f"{live_server}/sources/new")
+    assert page.locator("text=Upload file").count() >= 1
+    assert page.locator("text=Fetch from URL").count() >= 1
+    page.goto(f"{live_server}/sources/from-url")
+    assert "plaintext" in page.content().lower()
