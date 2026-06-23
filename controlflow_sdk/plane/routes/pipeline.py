@@ -31,6 +31,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from controlflow_sdk.pipeline.compile import compile_pipeline
+from controlflow_sdk.pipeline.materialize import new_step_cache as _new_step_cache
 from controlflow_sdk.pipeline.model import Pipeline, PipelineError, parse_pipeline
 from controlflow_sdk.plane.logic_view import derive_builder_graph, is_raw_python
 from controlflow_sdk.store import repo
@@ -55,11 +56,11 @@ JOIN_MODE_CHOICES: list[tuple[str, str]] = [
     ("not_exists", "not_exists — keep left rows absent from the right stream"),
 ]
 
-# Cap the sample used for live row-counts (the offline feedback loop must stay
-# fast and offline). 0 is the tell either way (a node dropping to 0).
-_ROWCOUNT_SAMPLE = 2000
-
 _EMPTY_GRAPH: dict[str, Any] = {"nodes": []}
+
+# Process-wide, LRU-bounded cache of materialised step frames (single-user, localhost).
+# Keyed inside materialize_steps by each node's ancestor-closure + source versions.
+_STEP_CACHE = _new_step_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -240,18 +241,17 @@ def _node_label(node: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Sample frames → live row-counts
+# Full-population frames → source versions → materialised steps → row-counts
 # ---------------------------------------------------------------------------
 
-def _load_sample_frames(
+def _load_full_frames(
     conn: sqlite3.Connection, root: Any, source_ids: list[str]
 ) -> dict[str, Any]:
-    """Load a capped pandas sample for each bound source (by source_id).
+    """Load the FULL coerced DataFrame for each bound source (by source_id).
 
-    Reuses the same adapter the runner uses (``source_for(...).load()``) so the
-    counts reflect exactly the coercion the real run applies — then caps to
-    :data:`_ROWCOUNT_SAMPLE` rows. Returns only the sources whose current file
-    exists; a missing frame makes :func:`compute_row_counts` return ``{}``.
+    Decision (ii): the live badges and the inspector run over the full population —
+    the incremental step cache keeps edits fast. Returns only the sources whose file
+    exists; a missing frame makes materialize_steps return ``{}``.
     """
     from controlflow_sdk.adapters.files import source_for
     from controlflow_sdk.store.loader import _binding
@@ -266,35 +266,57 @@ def _load_sample_frames(
         if not fpath.is_file():
             continue
         try:
-            pop = source_for(_binding(src), root).load()
-        except Exception:  # noqa: BLE001 — a broken file just yields no counts
+            frames[sid] = source_for(_binding(src), root).load().df
+        except Exception:  # noqa: BLE001 — a broken/adapters-missing file yields no frame
             continue
-        frames[sid] = pop.df.head(_ROWCOUNT_SAMPLE)
     return frames
+
+
+def _source_versions(
+    conn: sqlite3.Connection, root: Any, source_ids: list[str]
+) -> dict[str, str]:
+    """A cache-busting version token per source (current file path + mtime + size)."""
+    out: dict[str, str] = {}
+    for sid in source_ids:
+        current = repo.get_current_file(conn, sid)
+        if not current:
+            continue
+        stored = current["stored_path"]
+        try:
+            st = (root / stored).stat()
+            out[sid] = f"{stored}:{st.st_mtime_ns}:{st.st_size}"
+        except OSError:
+            out[sid] = stored
+    return out
+
+
+def _materialize_full(
+    conn: sqlite3.Connection, root: Any, pipeline: Pipeline
+) -> dict[str, Any]:
+    """Best-effort ``{node_id: DataFrame}`` over the full population (cached).
+
+    Returns ``{}`` when a source is unbound/missing or the probe fails — never raises
+    into the request (learning 0013).
+    """
+    from controlflow_sdk.pipeline.materialize import MaterializeError, materialize_steps
+    from controlflow_sdk.rules.spec import RuleSpecError
+
+    sids = pipeline.import_source_ids()
+    frames = _load_full_frames(conn, root, sids)
+    versions = _source_versions(conn, root, sids)
+    try:
+        return materialize_steps(
+            pipeline, frames, source_versions=versions, cache=_STEP_CACHE
+        )
+    except (MaterializeError, RuleSpecError):
+        return {}
 
 
 def _row_counts(
     conn: sqlite3.Connection, root: Any, pipeline: Pipeline
 ) -> dict[str, int]:
-    """Best-effort row-counts for a pipeline over capped source samples.
-
-    Returns ``{}`` when a source is unbound/missing or the probe fails (the
-    template then renders "—"); never raises into the request.
-
-    Catches both ``RowCountError`` (runtime failures in the probe) and
-    ``RuleSpecError`` (an incomplete/malformed Test-node condition — e.g. a
-    condition with ``column=""`` added via "+ Add condition" before the author
-    fills it in).  Row counts are a non-critical preview; an in-progress graph
-    must NOT crash the editor.
-    """
-    from controlflow_sdk.pipeline.rowcounts import RowCountError, compute_row_counts
-    from controlflow_sdk.rules.spec import RuleSpecError
-
-    frames = _load_sample_frames(conn, root, pipeline.import_source_ids())
-    try:
-        return compute_row_counts(pipeline, frames)
-    except (RowCountError, RuleSpecError):
-        return {}
+    """Best-effort full-population row-counts (``len`` over the materialised frames)."""
+    return {nid: len(df) for nid, df in _materialize_full(conn, root, pipeline).items()}
 
 
 # ---------------------------------------------------------------------------
