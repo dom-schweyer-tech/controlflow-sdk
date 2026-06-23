@@ -63,21 +63,21 @@ def upsert_source(
     conn: sqlite3.Connection, *, id: str, format: str, path: str,
     key_config: dict, title: str | None = None, description: str | None = None,
     completeness_accuracy: str | None = None, extract_date: str | None = None,
-    created_at: str = "",
+    created_at: str = "", sheet: str | None = None,
 ) -> None:
     conn.execute(
         """INSERT INTO sources
              (id, format, path, key_config, title, description,
-              completeness_accuracy, extract_date, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              completeness_accuracy, extract_date, created_at, sheet)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              format=excluded.format, path=excluded.path,
              key_config=excluded.key_config, title=excluded.title,
              description=excluded.description,
              completeness_accuracy=excluded.completeness_accuracy,
-             extract_date=excluded.extract_date""",
+             extract_date=excluded.extract_date, sheet=excluded.sheet""",
         (id, format, path, json.dumps(key_config), title, description,
-         completeness_accuracy, extract_date, created_at),
+         completeness_accuracy, extract_date, created_at, sheet),
     )
     conn.commit()
 
@@ -214,6 +214,40 @@ def set_current_file_asof(
     conn.execute("UPDATE sources SET extract_date = ? WHERE id = ?",
                  (as_of_date, source_id))
     conn.commit()
+
+
+# ---- source fetch (URL-snapshot provenance; store/UI-only) ------------------
+def upsert_source_fetch(
+    conn: sqlite3.Connection, *, source_id: str, url: str,
+    headers: dict | None = None, record_path: str | None = None,
+    last_fetched_at: str | None = None,
+) -> None:
+    """Persist (or overwrite) the URL/headers/record_path for a fetched source.
+
+    SECURITY: ``headers`` may contain auth tokens and is stored PLAINTEXT in
+    controlplane.db. The UI warns the user. This row never enters the bundle.
+    """
+    conn.execute(
+        """INSERT INTO source_fetch
+             (source_id, url, headers, record_path, last_fetched_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(source_id) DO UPDATE SET
+             url=excluded.url, headers=excluded.headers,
+             record_path=excluded.record_path, last_fetched_at=excluded.last_fetched_at""",
+        (source_id, url, json.dumps(headers or {}), record_path, last_fetched_at),
+    )
+    conn.commit()
+
+
+def get_source_fetch(conn: sqlite3.Connection, source_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM source_fetch WHERE source_id = ?", (source_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["headers"] = _loads(d.get("headers"), {})
+    return d
 
 
 # ---- controls + bindings ---------------------------------------------------

@@ -82,6 +82,7 @@ def import_project(conn: sqlite3.Connection, src: Path) -> tuple[int, int]:
             description=binding.description,
             completeness_accuracy=binding.completeness_accuracy,
             extract_date=binding.extract_date,
+            sheet=binding.config.get("sheet"),
         )
         repo.set_columns(
             conn,

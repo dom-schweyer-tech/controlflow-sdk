@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import csv as csvmod
-import io
+import json as jsonmod
 import sqlite3
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime
@@ -12,9 +11,17 @@ from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from controlflow_sdk.plane import fetch as fetchmod
 from controlflow_sdk.plane.coercion_check import coercion_report
+from controlflow_sdk.plane.ingest import AdaptersUnavailable, TableParseError, extract_table
 from controlflow_sdk.store import repo
 from controlflow_sdk.store.db import connect
+
+_UPLOAD_FORMATS = {".csv": "csv", ".xlsx": "xlsx", ".parquet": "parquet"}
+
+
+def _fmt_from_name(name: str) -> str | None:
+    return _UPLOAD_FORMATS.get(Path(name).suffix.lower())
 
 PAGE_SIZE = 50
 
@@ -28,8 +35,12 @@ def _pending_dir(root: Path, sid: str) -> Path:
     return root / "data" / ".pending" / sid
 
 
-def _header_of(raw: bytes) -> list[str]:
-    return next(csvmod.reader(io.StringIO(raw.decode("utf-8-sig"))), [])
+def _table_of(raw: bytes, fmt: str, sheet: str | None = None) -> Any:
+    return extract_table(raw, fmt, sheet=sheet)
+
+
+def _header_of(raw: bytes, fmt: str = "csv", sheet: str | None = None) -> list[str]:
+    return _table_of(raw, fmt, sheet).header
 
 
 def _stamp() -> str:
@@ -44,9 +55,8 @@ def _fmt_stamp(stamp: str) -> str:
         return stamp
 
 
-def _row_count(raw: bytes) -> int:
-    n = sum(1 for _ in csvmod.reader(io.StringIO(raw.decode("utf-8-sig"))))
-    return max(0, n - 1)  # exclude header
+def _row_count(raw: bytes, fmt: str = "csv", sheet: str | None = None) -> int:
+    return len(_table_of(raw, fmt, sheet).rows)
 
 
 def _reconcile_columns(
@@ -99,30 +109,128 @@ def register(
     async def create_source(
         request: Request,
         source_id: str = Form(...),
-        format: str = Form("csv"),
         as_of_date: str = Form(""),
+        sheet: str = Form(""),
         file: UploadFile = File(...),
     ) -> Any:
         root = request.app.state.project_root
+        filename = file.filename or f"{source_id}.csv"
+        fmt = _fmt_from_name(filename)
+        raw = await file.read()
+
+        def _err(msg: str) -> Any:
+            return templates.TemplateResponse(
+                request, "source_new.html",
+                {"project": {"name": ""}, "error": msg}, status_code=200,
+            )
+
+        if fmt is None:
+            return _err(
+                f"Unsupported file type for {filename!r}. "
+                "Upload a .csv, .xlsx, or .parquet file (legacy .xls is not supported)."
+            )
+        sheet_val = sheet.strip() or None
+        try:
+            table = extract_table(raw, fmt, sheet=sheet_val)
+        except (AdaptersUnavailable, TableParseError) as e:
+            return _err(str(e))
+
         conn = connect(root)
         try:
             (root / "data").mkdir(parents=True, exist_ok=True)
-            raw = await file.read()
-            dest = root / "data" / (file.filename or f"{source_id}.csv")
+            dest = root / "data" / Path(filename).name
             dest.write_bytes(raw)
-            header = next(csvmod.reader(io.StringIO(raw.decode("utf-8-sig"))), [])
-            repo.upsert_source(conn, id=source_id, format=format,
-                               path=f"data/{dest.name}", key_config={"mode": "auto"})
+            repo.upsert_source(conn, id=source_id, format=fmt,
+                               path=f"data/{dest.name}", key_config={"mode": "auto"},
+                               sheet=sheet_val)
             repo.set_columns(conn, source_id, [
                 {"original_name": h, "display_name": h, "data_type": "text",
                  "is_key": False, "include": True, "ordinal": i}
-                for i, h in enumerate(header)
+                for i, h in enumerate(table.header)
             ])
             repo.set_initial_file(
                 conn, source_id=source_id, stored_path=f"data/{dest.name}",
                 original_name=dest.name, as_of_date=as_of_date.strip() or None,
-                row_count=_row_count(raw), uploaded_at=_stamp(),
+                row_count=len(table.rows), uploaded_at=_stamp(),
             )
+            if as_of_date.strip():
+                conn.execute("UPDATE sources SET extract_date = ? WHERE id = ?",
+                             (as_of_date.strip(), source_id))
+                conn.commit()
+        finally:
+            conn.close()
+        return RedirectResponse(f"/sources/{source_id}", status_code=303)
+
+    def _do_fetch(request: Request, url: str, headers: dict, record_path: str | None):
+        # Tests inject app.state.fetch_opener; production uses the default opener.
+        opener = getattr(request.app.state, "fetch_opener", None)
+        return fetchmod.fetch_snapshot(url, headers=headers or None,
+                                       record_path=record_path or None, opener=opener)
+
+    def _parse_headers(raw: str) -> dict:
+        raw = (raw or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = jsonmod.loads(raw)
+        except jsonmod.JSONDecodeError as e:
+            raise fetchmod.FetchError(f"Headers must be a JSON object: {e}") from e
+        if not isinstance(parsed, dict):
+            raise fetchmod.FetchError("Headers must be a JSON object, e.g. "
+                                      '{"Authorization": "Bearer ..."}')
+        return {str(k): str(v) for k, v in parsed.items()}
+
+    @app.get("/sources/from-url", response_class=HTMLResponse)
+    def new_source_from_url(request: Request) -> Any:
+        return templates.TemplateResponse(
+            request, "source_new.html", {"project": {"name": ""}, "mode": "url"},
+        )
+
+    @app.post("/sources/from-url")
+    async def create_source_from_url(
+        request: Request,
+        source_id: str = Form(...),
+        url: str = Form(...),
+        headers: str = Form(""),
+        record_path: str = Form(""),
+        as_of_date: str = Form(""),
+    ) -> Any:
+        root = request.app.state.project_root
+
+        def _err(msg: str) -> Any:
+            return templates.TemplateResponse(
+                request, "source_new.html",
+                {"project": {"name": ""}, "mode": "url", "error": msg,
+                 "url": url, "record_path": record_path}, status_code=200,
+            )
+
+        try:
+            hdrs = _parse_headers(headers)
+            snap = _do_fetch(request, url, hdrs, record_path.strip())
+            table = extract_table(snap.raw, snap.fmt)
+        except (fetchmod.FetchError, AdaptersUnavailable, TableParseError) as e:
+            return _err(str(e))
+
+        conn = connect(root)
+        try:
+            (root / "data").mkdir(parents=True, exist_ok=True)
+            dest = root / "data" / snap.suggested_name
+            dest.write_bytes(snap.raw)
+            repo.upsert_source(conn, id=source_id, format=snap.fmt,
+                               path=f"data/{dest.name}", key_config={"mode": "auto"})
+            repo.set_columns(conn, source_id, [
+                {"original_name": h, "display_name": h, "data_type": "text",
+                 "is_key": False, "include": True, "ordinal": i}
+                for i, h in enumerate(table.header)
+            ])
+            repo.set_initial_file(
+                conn, source_id=source_id, stored_path=f"data/{dest.name}",
+                original_name=dest.name, as_of_date=as_of_date.strip() or None,
+                row_count=len(table.rows), uploaded_at=_stamp(),
+            )
+            repo.upsert_source_fetch(conn, source_id=source_id, url=snap.source_url,
+                                     headers=hdrs, record_path=record_path.strip() or None,
+                                     last_fetched_at=snap.fetched_at)
             if as_of_date.strip():
                 conn.execute("UPDATE sources SET extract_date = ? WHERE id = ?",
                              (as_of_date.strip(), source_id))
@@ -159,18 +267,23 @@ def register(
         rows: list[list[str]] = []
         data_rows: list[list[str]] = []
         total = 0
+        adapters_error: str | None = None
         if current:
             fpath = root / current["stored_path"]
             if fpath.is_file():
-                all_rows = list(
-                    csvmod.reader(io.StringIO(fpath.read_text(encoding="utf-8-sig")))
-                )
-                if all_rows:
-                    header, data_rows = all_rows[0], all_rows[1:]
+                fmt = (source or {}).get("format", "csv")
+                sheet = (source or {}).get("sheet")
+                # Never 500: an xlsx/parquet source viewed without the [adapters]
+                # extra degrades to a friendly banner instead of raising.
+                try:
+                    table = extract_table(fpath.read_bytes(), fmt, sheet=sheet)
+                    header, data_rows = table.header, table.rows
                     total = len(data_rows)
                     page = max(1, page)
                     start = (page - 1) * PAGE_SIZE
                     rows = data_rows[start:start + PAGE_SIZE]
+                except (AdaptersUnavailable, TableParseError) as e:
+                    adapters_error = str(e)
         page_count = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         # Coercion-health verdict computed over the FULL file (not the paginated
         # slice) so it stays honest even when page 1 happens to be clean (0004).
@@ -183,7 +296,9 @@ def register(
              "source": source, "current": current,
              "header": header, "rows": rows, "total": total,
              "page": min(page, page_count), "page_count": page_count,
-             "page_size": PAGE_SIZE, "coercion": coercion, "active": "data"},
+             "page_size": PAGE_SIZE, "coercion": coercion,
+             "adapters_error": adapters_error, "active": "data",
+             "fetch": repo.get_source_fetch(conn, source_id)},
         )
 
     @app.get("/sources/{source_id}/history", response_class=HTMLResponse)
@@ -199,7 +314,8 @@ def register(
             request, "source_history.html",
             {"project": repo.get_project(conn) or {"name": ""},
              "source": repo.get_source(conn, source_id),
-             "files": files, "active": "history"},
+             "files": files, "active": "history",
+             "fetch": repo.get_source_fetch(conn, source_id)},
         )
 
     @app.post("/sources/{source_id}/data/asof")
@@ -263,6 +379,7 @@ def register(
                 # Not exposed in the editor form — preserve the imported value.
                 completeness_accuracy=existing.get("completeness_accuracy"),
                 extract_date=existing.get("extract_date"),
+                sheet=existing.get("sheet"),
             )
         finally:
             conn.close()
@@ -287,7 +404,16 @@ def register(
             pdir.mkdir(parents=True, exist_ok=True)
             pending_name = Path(file.filename or f"{source_id}.csv").name
             (pdir / pending_name).write_bytes(raw)
-            new_headers = _header_of(raw)
+            try:
+                new_headers = _header_of(raw, existing["format"], existing.get("sheet"))
+            except (AdaptersUnavailable, TableParseError) as e:
+                (pdir / pending_name).unlink(missing_ok=True)
+                return templates.TemplateResponse(
+                    request, "source_edit.html",
+                    {"project": repo.get_project(conn) or {"name": ""},
+                     "source": existing, "active": "definition", "error": str(e)},
+                    status_code=200,
+                )
             _, added, removed = _reconcile_columns(existing["columns"], new_headers)
             return templates.TemplateResponse(
                 request,
@@ -332,7 +458,8 @@ def register(
             pending_path.unlink()
 
             reconciled, _, removed = _reconcile_columns(
-                existing["columns"], _header_of(new_bytes)
+                existing["columns"],
+                _header_of(new_bytes, existing["format"], existing.get("sheet")),
             )
             repo.set_columns(conn, source_id, reconciled)
 
@@ -351,7 +478,8 @@ def register(
                 conn, source_id=source_id, stored_path=existing["path"],
                 original_name=Path(pending).name,
                 as_of_date=as_of_date.strip() or None,
-                row_count=_row_count(new_bytes), uploaded_at=stamp,
+                row_count=_row_count(new_bytes, existing["format"], existing.get("sheet")),
+                uploaded_at=stamp,
             )
 
             new_extract_date = as_of_date.strip() or existing.get("extract_date")
@@ -361,6 +489,7 @@ def register(
                 title=existing.get("title"), description=existing.get("description"),
                 completeness_accuracy=existing.get("completeness_accuracy"),
                 extract_date=new_extract_date,
+                sheet=existing.get("sheet"),
             )
             return RedirectResponse(f"/sources/{source_id}", status_code=303)
         finally:
@@ -379,3 +508,45 @@ def register(
             if p.is_file():
                 p.unlink()
         return RedirectResponse(f"/sources/{source_id}", status_code=303)
+
+    @app.post("/sources/{source_id}/refetch")
+    async def refetch_source(source_id: str, request: Request) -> Any:
+        """Re-run the stored URL fetch and route through the refresh-confirm diff."""
+        root = request.app.state.project_root
+        conn = connect(root)
+        try:
+            existing = repo.get_source(conn, source_id)
+            fetch_row = repo.get_source_fetch(conn, source_id)
+            if existing is None or fetch_row is None:
+                return RedirectResponse(f"/sources/{source_id}", status_code=303)
+            try:
+                snap = _do_fetch(request, fetch_row["url"], fetch_row["headers"],
+                                 fetch_row.get("record_path"))
+                new_headers = extract_table(snap.raw, snap.fmt).header
+            except (fetchmod.FetchError, AdaptersUnavailable, TableParseError) as e:
+                return templates.TemplateResponse(
+                    request, "source_data.html",
+                    {"project": repo.get_project(conn) or {"name": ""},
+                     "source": existing, "current": repo.get_current_file(conn, source_id),
+                     "header": [], "rows": [], "total": 0, "page": 1, "page_count": 1,
+                     "page_size": PAGE_SIZE, "coercion": [], "active": "data",
+                     "fetch": fetch_row, "error": str(e), "adapters_error": None}, status_code=200,
+                )
+            pdir = _pending_dir(root, source_id)
+            pdir.mkdir(parents=True, exist_ok=True)
+            (pdir / snap.suggested_name).write_bytes(snap.raw)
+            _, added, removed = _reconcile_columns(existing["columns"], new_headers)
+            # Refresh last_fetched_at provenance now (the snapshot was taken).
+            repo.upsert_source_fetch(conn, source_id=source_id, url=fetch_row["url"],
+                                     headers=fetch_row["headers"],
+                                     record_path=fetch_row.get("record_path"),
+                                     last_fetched_at=snap.fetched_at)
+            return templates.TemplateResponse(
+                request, "source_refresh.html",
+                {"project": repo.get_project(conn) or {"name": ""},
+                 "source": existing, "pending": snap.suggested_name,
+                 "new_headers": new_headers, "added": added, "removed": removed,
+                 "as_of_date": ""},
+            )
+        finally:
+            conn.close()

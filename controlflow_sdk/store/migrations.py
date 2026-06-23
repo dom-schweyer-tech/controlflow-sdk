@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Forward-only, idempotent DDL. Index = target user_version.
 _STEPS: list[str] = [
@@ -122,6 +122,25 @@ _STEPS: list[str] = [
     # (learning 0001). RunRecord.to_dict() intentionally omits this field.
     """
     ALTER TABLE runs ADD COLUMN procedure_id TEXT NOT NULL DEFAULT '';
+    """,
+    # --- step 6 -> user_version 6 -------------------------------------------
+    # Multi-format sources. (a) sources.sheet: which xlsx worksheet a source
+    # reads (NULL = first sheet); threaded into SourceBinding.config at run
+    # time so a control's run reads the chosen sheet. (b) source_fetch:
+    # store-only provenance for URL-snapshot sources — the URL, request
+    # headers (which MAY carry an auth token, persisted plaintext with a loud
+    # UI warning), and an optional JSON record_path, so "Re-fetch from URL" is
+    # one click. NEITHER is ever serialized into the bundle (learning 0001):
+    # this bumps the STORE user_version only, not schema_version.
+    """
+    ALTER TABLE sources ADD COLUMN sheet TEXT;
+    CREATE TABLE IF NOT EXISTS source_fetch (
+        source_id       TEXT PRIMARY KEY REFERENCES sources(id) ON DELETE CASCADE,
+        url             TEXT NOT NULL,
+        headers         TEXT NOT NULL DEFAULT '{}',  -- JSON; may contain auth tokens
+        record_path     TEXT,
+        last_fetched_at TEXT
+    );
     """,
 ]
 

@@ -13,11 +13,18 @@ from controlflow_sdk.project.loader import ProjectConfig
 from controlflow_sdk.store import repo
 
 
+def _source_config(src: dict) -> dict:
+    config = {"path": src["path"], "format": src["format"]}
+    if src.get("sheet"):
+        config["sheet"] = src["sheet"]
+    return config
+
+
 def _binding(src: dict) -> SourceBinding:
     return SourceBinding(
         id=src["id"],
         type="file",
-        config={"path": src["path"], "format": src["format"]},
+        config=_source_config(src),
         key_config=src["key_config"],
         column_mappings=[
             {
