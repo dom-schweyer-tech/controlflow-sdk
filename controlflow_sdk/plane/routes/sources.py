@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as jsonmod
 import sqlite3
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime
@@ -10,6 +11,7 @@ from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from controlflow_sdk.plane import fetch as fetchmod
 from controlflow_sdk.plane.coercion_check import coercion_report
 from controlflow_sdk.plane.ingest import AdaptersUnavailable, extract_table
 from controlflow_sdk.store import repo
@@ -151,6 +153,84 @@ def register(
                 original_name=dest.name, as_of_date=as_of_date.strip() or None,
                 row_count=len(table.rows), uploaded_at=_stamp(),
             )
+            if as_of_date.strip():
+                conn.execute("UPDATE sources SET extract_date = ? WHERE id = ?",
+                             (as_of_date.strip(), source_id))
+                conn.commit()
+        finally:
+            conn.close()
+        return RedirectResponse(f"/sources/{source_id}", status_code=303)
+
+    def _do_fetch(request: Request, url: str, headers: dict, record_path: str | None):
+        # Tests inject app.state.fetch_opener; production uses the default opener.
+        opener = getattr(request.app.state, "fetch_opener", None)
+        return fetchmod.fetch_snapshot(url, headers=headers or None,
+                                       record_path=record_path or None, opener=opener)
+
+    def _parse_headers(raw: str) -> dict:
+        raw = (raw or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = jsonmod.loads(raw)
+        except jsonmod.JSONDecodeError as e:
+            raise fetchmod.FetchError(f"Headers must be a JSON object: {e}") from e
+        if not isinstance(parsed, dict):
+            raise fetchmod.FetchError("Headers must be a JSON object, e.g. "
+                                      '{"Authorization": "Bearer ..."}')
+        return {str(k): str(v) for k, v in parsed.items()}
+
+    @app.get("/sources/from-url", response_class=HTMLResponse)
+    def new_source_from_url(request: Request) -> Any:
+        return templates.TemplateResponse(
+            request, "source_new.html", {"project": {"name": ""}, "mode": "url"},
+        )
+
+    @app.post("/sources/from-url")
+    async def create_source_from_url(
+        request: Request,
+        source_id: str = Form(...),
+        url: str = Form(...),
+        headers: str = Form(""),
+        record_path: str = Form(""),
+        as_of_date: str = Form(""),
+    ) -> Any:
+        root = request.app.state.project_root
+
+        def _err(msg: str) -> Any:
+            return templates.TemplateResponse(
+                request, "source_new.html",
+                {"project": {"name": ""}, "mode": "url", "error": msg,
+                 "url": url, "record_path": record_path}, status_code=200,
+            )
+
+        try:
+            hdrs = _parse_headers(headers)
+            snap = _do_fetch(request, url, hdrs, record_path.strip())
+            table = extract_table(snap.raw, snap.fmt)
+        except (fetchmod.FetchError, AdaptersUnavailable) as e:
+            return _err(str(e))
+
+        conn = connect(root)
+        try:
+            (root / "data").mkdir(parents=True, exist_ok=True)
+            dest = root / "data" / snap.suggested_name
+            dest.write_bytes(snap.raw)
+            repo.upsert_source(conn, id=source_id, format=snap.fmt,
+                               path=f"data/{dest.name}", key_config={"mode": "auto"})
+            repo.set_columns(conn, source_id, [
+                {"original_name": h, "display_name": h, "data_type": "text",
+                 "is_key": False, "include": True, "ordinal": i}
+                for i, h in enumerate(table.header)
+            ])
+            repo.set_initial_file(
+                conn, source_id=source_id, stored_path=f"data/{dest.name}",
+                original_name=dest.name, as_of_date=as_of_date.strip() or None,
+                row_count=len(table.rows), uploaded_at=_stamp(),
+            )
+            repo.upsert_source_fetch(conn, source_id=source_id, url=snap.source_url,
+                                     headers=hdrs, record_path=record_path.strip() or None,
+                                     last_fetched_at=snap.fetched_at)
             if as_of_date.strip():
                 conn.execute("UPDATE sources SET extract_date = ? WHERE id = ?",
                              (as_of_date.strip(), source_id))
