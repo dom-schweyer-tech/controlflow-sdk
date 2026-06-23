@@ -297,7 +297,8 @@ def register(
              "header": header, "rows": rows, "total": total,
              "page": min(page, page_count), "page_count": page_count,
              "page_size": PAGE_SIZE, "coercion": coercion,
-             "adapters_error": adapters_error, "active": "data"},
+             "adapters_error": adapters_error, "active": "data",
+             "fetch": repo.get_source_fetch(conn, source_id)},
         )
 
     @app.get("/sources/{source_id}/history", response_class=HTMLResponse)
@@ -495,3 +496,45 @@ def register(
             if p.is_file():
                 p.unlink()
         return RedirectResponse(f"/sources/{source_id}", status_code=303)
+
+    @app.post("/sources/{source_id}/refetch")
+    async def refetch_source(source_id: str, request: Request) -> Any:
+        """Re-run the stored URL fetch and route through the refresh-confirm diff."""
+        root = request.app.state.project_root
+        conn = connect(root)
+        try:
+            existing = repo.get_source(conn, source_id)
+            fetch_row = repo.get_source_fetch(conn, source_id)
+            if existing is None or fetch_row is None:
+                return RedirectResponse(f"/sources/{source_id}", status_code=303)
+            try:
+                snap = _do_fetch(request, fetch_row["url"], fetch_row["headers"],
+                                 fetch_row.get("record_path"))
+                new_headers = extract_table(snap.raw, snap.fmt).header
+            except (fetchmod.FetchError, AdaptersUnavailable) as e:
+                return templates.TemplateResponse(
+                    request, "source_data.html",
+                    {"project": repo.get_project(conn) or {"name": ""},
+                     "source": existing, "current": repo.get_current_file(conn, source_id),
+                     "header": [], "rows": [], "total": 0, "page": 1, "page_count": 1,
+                     "page_size": PAGE_SIZE, "coercion": [], "active": "data",
+                     "fetch": fetch_row, "error": str(e), "adapters_error": None}, status_code=200,
+                )
+            pdir = _pending_dir(root, source_id)
+            pdir.mkdir(parents=True, exist_ok=True)
+            (pdir / snap.suggested_name).write_bytes(snap.raw)
+            _, added, removed = _reconcile_columns(existing["columns"], new_headers)
+            # Refresh last_fetched_at provenance now (the snapshot was taken).
+            repo.upsert_source_fetch(conn, source_id=source_id, url=fetch_row["url"],
+                                     headers=fetch_row["headers"],
+                                     record_path=fetch_row.get("record_path"),
+                                     last_fetched_at=snap.fetched_at)
+            return templates.TemplateResponse(
+                request, "source_refresh.html",
+                {"project": repo.get_project(conn) or {"name": ""},
+                 "source": existing, "pending": snap.suggested_name,
+                 "new_headers": new_headers, "added": added, "removed": removed,
+                 "as_of_date": ""},
+            )
+        finally:
+            conn.close()

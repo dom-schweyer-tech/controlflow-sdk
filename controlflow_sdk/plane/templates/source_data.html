@@ -8,6 +8,16 @@
 </div>
 {% include "_source_tabs.html" %}
 {% if adapters_error %}<div class="callout callout-warn">{{ adapters_error }}</div>{% endif %}
+{% if error %}<div class="callout callout-warn">{{ error }}</div>{% endif %}
+{% if fetch %}
+<div class="callout callout-warn">
+  ⚠ This source was fetched from <span class="mono">{{ fetch.url }}</span>. Stored
+  credentials are kept <strong>plaintext</strong> in <span class="mono">controlplane.db</span>.
+</div>
+<form method="post" action="/sources/{{ source.id }}/refetch">
+  <button class="btn" type="submit">Re-fetch from URL</button>
+</form>
+{% endif %}
 
 <div class="card">
   <h2>Current file</h2>
