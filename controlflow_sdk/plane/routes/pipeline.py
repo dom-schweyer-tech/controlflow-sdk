@@ -27,7 +27,7 @@ from collections.abc import Callable, Generator
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from controlflow_sdk.pipeline.compile import compile_pipeline
@@ -57,6 +57,12 @@ JOIN_MODE_CHOICES: list[tuple[str, str]] = [
 ]
 
 _EMPTY_GRAPH: dict[str, Any] = {"nodes": []}
+_XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _now_iso() -> str:
+    from datetime import UTC, datetime
+    return datetime.now(UTC).isoformat()
 
 # Process-wide, LRU-bounded cache of materialised step frames (single-user, localhost).
 # Keyed inside materialize_steps by each node's ancestor-closure + source versions.
@@ -683,6 +689,74 @@ def register(
             elif not pipeline.import_source_ids() or node is not None:
                 ctx["reason"] = "Bind a data source (and complete this step) to inspect it."
         return templates.TemplateResponse(request, "partials/_step_data.html", ctx)
+
+    # --- Step export routes --------------------------------------------------
+
+    @app.get("/controls/{control_id}/logic/step/{node_id}/export.xlsx", response_model=None)
+    def step_export(
+        control_id: str,
+        node_id: str,
+        request: Request,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> Response:
+        from controlflow_sdk.adapters import xlsx_export
+        from controlflow_sdk.plane.ingest import AdaptersUnavailable
+
+        root = request.app.state.project_root
+        pipeline = _pipeline_for_view(repo.get_control(conn, control_id))
+        frame = None
+        label = node_id
+        if pipeline is not None:
+            try:
+                label = _node_label(pipeline.node(node_id))
+            except KeyError:
+                pass
+            frame = _materialize_full(conn, root, pipeline).get(node_id)
+        if frame is None:
+            return PlainTextResponse("This step isn't computable yet.", status_code=409)
+        try:
+            data = xlsx_export.write_single_step(frame, label)
+        except AdaptersUnavailable as exc:
+            return PlainTextResponse(str(exc), status_code=503)
+        return Response(
+            content=data, media_type=_XLSX_MEDIA,
+            headers={"content-disposition":
+                     f'attachment; filename="{control_id}-{node_id}.xlsx"'},
+        )
+
+    @app.get("/controls/{control_id}/logic/export-steps.xlsx", response_model=None)
+    def steps_export(
+        control_id: str,
+        request: Request,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> Response:
+        from controlflow_sdk.adapters import xlsx_export
+        from controlflow_sdk.plane.ingest import AdaptersUnavailable
+
+        root = request.app.state.project_root
+        control = repo.get_control(conn, control_id)
+        pipeline = _pipeline_for_view(control)
+        if pipeline is None:
+            return PlainTextResponse("No inspectable pipeline yet.", status_code=409)
+        frames = _materialize_full(conn, root, pipeline)
+        if not frames:
+            return PlainTextResponse("Bind a data source first.", status_code=409)
+        steps = [(_node_label(n), frames[n.id])
+                 for n in pipeline.topological() if n.id in frames]
+        meta = {
+            "control": control_id,
+            "title": str((control or {}).get("title") or ""),
+            "generated_at": _now_iso(),
+        }
+        try:
+            data = xlsx_export.write_step_workbook(steps, meta)
+        except AdaptersUnavailable as exc:
+            return PlainTextResponse(str(exc), status_code=503)
+        return Response(
+            content=data, media_type=_XLSX_MEDIA,
+            headers={"content-disposition":
+                     f'attachment; filename="{control_id}-steps.xlsx"'},
+        )
 
     # --- Logic sub-route GETs ------------------------------------------------
 

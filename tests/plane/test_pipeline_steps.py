@@ -138,3 +138,30 @@ def test_step_data_unknown_node_degrades(client):
     r = c.get(f"/controls/{control_id}/logic/step/does-not-exist/data")
     assert r.status_code == 200                              # never 500
     assert "isn't computable" in r.text or "not computable" in r.text
+
+
+# ---------------------------------------------------------------------------
+# xlsx export route tests
+# ---------------------------------------------------------------------------
+
+from io import BytesIO  # noqa: E402
+
+import pandas as pd  # noqa: E402
+
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def test_per_step_xlsx_downloads(client):
+    c, control_id = _seeded(client)
+    r = c.get(f"/controls/{control_id}/logic/step/flt/export.xlsx")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith(_XLSX)
+    pd.read_excel(BytesIO(r.content), engine="openpyxl")   # valid workbook
+
+
+def test_workbook_xlsx_has_a_sheet_per_step(client):
+    c, control_id = _seeded(client)
+    r = c.get(f"/controls/{control_id}/logic/export-steps.xlsx")
+    assert r.status_code == 200
+    names = pd.ExcelFile(BytesIO(r.content), engine="openpyxl").sheet_names
+    assert "Summary" in names and "About" in names
