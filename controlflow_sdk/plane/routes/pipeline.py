@@ -27,10 +27,11 @@ from collections.abc import Callable, Generator
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from controlflow_sdk.pipeline.compile import compile_pipeline
+from controlflow_sdk.pipeline.materialize import new_step_cache as _new_step_cache
 from controlflow_sdk.pipeline.model import Pipeline, PipelineError, parse_pipeline
 from controlflow_sdk.plane.logic_view import derive_builder_graph, is_raw_python
 from controlflow_sdk.store import repo
@@ -55,11 +56,17 @@ JOIN_MODE_CHOICES: list[tuple[str, str]] = [
     ("not_exists", "not_exists — keep left rows absent from the right stream"),
 ]
 
-# Cap the sample used for live row-counts (the offline feedback loop must stay
-# fast and offline). 0 is the tell either way (a node dropping to 0).
-_ROWCOUNT_SAMPLE = 2000
-
 _EMPTY_GRAPH: dict[str, Any] = {"nodes": []}
+_XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _now_iso() -> str:
+    from datetime import UTC, datetime
+    return datetime.now(UTC).isoformat()
+
+# Process-wide, LRU-bounded cache of materialised step frames (single-user, localhost).
+# Keyed inside materialize_steps by each node's ancestor-closure + source versions.
+_STEP_CACHE = _new_step_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -240,18 +247,17 @@ def _node_label(node: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Sample frames → live row-counts
+# Full-population frames → source versions → materialised steps → row-counts
 # ---------------------------------------------------------------------------
 
-def _load_sample_frames(
+def _load_full_frames(
     conn: sqlite3.Connection, root: Any, source_ids: list[str]
 ) -> dict[str, Any]:
-    """Load a capped pandas sample for each bound source (by source_id).
+    """Load the FULL coerced DataFrame for each bound source (by source_id).
 
-    Reuses the same adapter the runner uses (``source_for(...).load()``) so the
-    counts reflect exactly the coercion the real run applies — then caps to
-    :data:`_ROWCOUNT_SAMPLE` rows. Returns only the sources whose current file
-    exists; a missing frame makes :func:`compute_row_counts` return ``{}``.
+    Decision (ii): the live badges and the inspector run over the full population —
+    the incremental step cache keeps edits fast. Returns only the sources whose file
+    exists; a missing frame makes materialize_steps return ``{}``.
     """
     from controlflow_sdk.adapters.files import source_for
     from controlflow_sdk.store.loader import _binding
@@ -266,35 +272,84 @@ def _load_sample_frames(
         if not fpath.is_file():
             continue
         try:
-            pop = source_for(_binding(src), root).load()
-        except Exception:  # noqa: BLE001 — a broken file just yields no counts
+            frames[sid] = source_for(_binding(src), root).load().df
+        except Exception:  # noqa: BLE001 — a broken/adapters-missing file yields no frame
             continue
-        frames[sid] = pop.df.head(_ROWCOUNT_SAMPLE)
     return frames
+
+
+def _source_versions(
+    conn: sqlite3.Connection, root: Any, source_ids: list[str]
+) -> dict[str, str]:
+    """A cache-busting version token per source (current file path + mtime + size)."""
+    out: dict[str, str] = {}
+    for sid in source_ids:
+        current = repo.get_current_file(conn, sid)
+        if not current:
+            continue
+        stored = current["stored_path"]
+        try:
+            st = (root / stored).stat()
+            out[sid] = f"{stored}:{st.st_mtime_ns}:{st.st_size}"
+        except OSError:
+            out[sid] = stored
+    return out
+
+
+def _materialize_full(
+    conn: sqlite3.Connection, root: Any, pipeline: Pipeline
+) -> dict[str, Any]:
+    """Best-effort ``{node_id: DataFrame}`` over the full population (cached).
+
+    Returns ``{}`` when a source is unbound/missing or the probe fails — never raises
+    into the request (learning 0013).
+    """
+    from controlflow_sdk.pipeline.materialize import MaterializeError, materialize_steps
+    from controlflow_sdk.rules.spec import RuleSpecError
+
+    sids = pipeline.import_source_ids()
+    frames = _load_full_frames(conn, root, sids)
+    versions = _source_versions(conn, root, sids)
+    try:
+        return materialize_steps(
+            pipeline, frames, source_versions=versions, cache=_STEP_CACHE
+        )
+    except (MaterializeError, RuleSpecError):
+        return {}
 
 
 def _row_counts(
     conn: sqlite3.Connection, root: Any, pipeline: Pipeline
 ) -> dict[str, int]:
-    """Best-effort row-counts for a pipeline over capped source samples.
+    """Best-effort full-population row-counts (``len`` over the materialised frames)."""
+    return {nid: len(df) for nid, df in _materialize_full(conn, root, pipeline).items()}
 
-    Returns ``{}`` when a source is unbound/missing or the probe fails (the
-    template then renders "—"); never raises into the request.
 
-    Catches both ``RowCountError`` (runtime failures in the probe) and
-    ``RuleSpecError`` (an incomplete/malformed Test-node condition — e.g. a
-    condition with ``column=""`` added via "+ Add condition" before the author
-    fills it in).  Row counts are a non-critical preview; an in-progress graph
-    must NOT crash the editor.
-    """
-    from controlflow_sdk.pipeline.rowcounts import RowCountError, compute_row_counts
-    from controlflow_sdk.rules.spec import RuleSpecError
-
-    frames = _load_sample_frames(conn, root, pipeline.import_source_ids())
+def pd_isna(v: Any) -> bool:
+    """NaN/NaT-safe truthiness for display (avoids importing pandas at module top)."""
     try:
-        return compute_row_counts(pipeline, frames)
-    except (RowCountError, RuleSpecError):
-        return {}
+        import pandas as pd
+        return bool(pd.isna(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _pipeline_for_view(control: dict | None) -> Pipeline | None:
+    """The parsed pipeline the Builder cards/counts are rendered from.
+
+    Mirrors ``_editor_context(for_builder=True)``: a raw-Python control has none; otherwise
+    use the derived builder graph (so rule_spec/empty controls still show their scaffold).
+    """
+    if control is None or is_raw_python(control):
+        return None
+    graph = derive_builder_graph(control, list(control.get("source_ids") or [])) \
+        or _graph_of(control)
+    if not graph.get("nodes"):
+        return None
+    try:
+        return parse_pipeline(graph)
+    except PipelineError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +644,120 @@ def register(
     def logic_redirect(control_id: str) -> RedirectResponse:
         return RedirectResponse(f"/controls/{control_id}/logic/builder", status_code=302)
 
+    # --- Step inspector route ------------------------------------------------
+
+    _STEP_PAGE = 100
+
+    @app.get("/controls/{control_id}/logic/step/{node_id}/data", response_class=HTMLResponse)
+    def step_data(
+        control_id: str,
+        node_id: str,
+        request: Request,
+        page: int = 1,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> HTMLResponse:
+        root = request.app.state.project_root
+        control = repo.get_control(conn, control_id)
+        pipeline = _pipeline_for_view(control)
+        ctx: dict[str, Any] = {
+            "control_id": control_id, "node_id": node_id,
+            "frame_available": False, "reason": "This step is not computable yet.",
+        }
+        if pipeline is not None:
+            try:
+                node = pipeline.node(node_id)
+                ctx["step_label"] = _node_label(node)
+            except KeyError:
+                node = None
+            steps = _materialize_full(conn, root, pipeline)
+            frame = steps.get(node_id)
+            if frame is not None:
+                total = len(frame)
+                page = max(1, page)
+                page_count = max(1, (total + _STEP_PAGE - 1) // _STEP_PAGE)
+                page = min(page, page_count)
+                start = (page - 1) * _STEP_PAGE
+                window = frame.iloc[start:start + _STEP_PAGE]
+                ctx.update({
+                    "frame_available": True,
+                    "header": [str(c) for c in frame.columns],
+                    "rows": [[("" if pd_isna(v) else str(v)) for v in row]
+                             for row in window.itertuples(index=False, name=None)],
+                    "total": total, "page": page, "page_count": page_count,
+                    "start1": start + 1, "end1": start + len(window),
+                })
+            elif not pipeline.import_source_ids() or node is not None:
+                ctx["reason"] = "Bind a data source (and complete this step) to inspect it."
+        return templates.TemplateResponse(request, "partials/_step_data.html", ctx)
+
+    # --- Step export routes --------------------------------------------------
+
+    @app.get("/controls/{control_id}/logic/step/{node_id}/export.xlsx", response_model=None)
+    def step_export(
+        control_id: str,
+        node_id: str,
+        request: Request,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> Response:
+        from controlflow_sdk.adapters import xlsx_export
+        from controlflow_sdk.plane.ingest import AdaptersUnavailable
+
+        root = request.app.state.project_root
+        pipeline = _pipeline_for_view(repo.get_control(conn, control_id))
+        frame = None
+        label = node_id
+        if pipeline is not None:
+            try:
+                label = _node_label(pipeline.node(node_id))
+            except KeyError:
+                pass
+            frame = _materialize_full(conn, root, pipeline).get(node_id)
+        if frame is None:
+            return PlainTextResponse("This step isn't computable yet.", status_code=409)
+        try:
+            data = xlsx_export.write_single_step(frame, label)
+        except AdaptersUnavailable as exc:
+            return PlainTextResponse(str(exc), status_code=503)
+        return Response(
+            content=data, media_type=_XLSX_MEDIA,
+            headers={"content-disposition":
+                     f'attachment; filename="{control_id}-{node_id}.xlsx"'},
+        )
+
+    @app.get("/controls/{control_id}/logic/export-steps.xlsx", response_model=None)
+    def steps_export(
+        control_id: str,
+        request: Request,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> Response:
+        from controlflow_sdk.adapters import xlsx_export
+        from controlflow_sdk.plane.ingest import AdaptersUnavailable
+
+        root = request.app.state.project_root
+        control = repo.get_control(conn, control_id)
+        pipeline = _pipeline_for_view(control)
+        if pipeline is None:
+            return PlainTextResponse("No inspectable pipeline yet.", status_code=409)
+        frames = _materialize_full(conn, root, pipeline)
+        if not frames:
+            return PlainTextResponse("Bind a data source first.", status_code=409)
+        steps = [(_node_label(n), frames[n.id])
+                 for n in pipeline.topological() if n.id in frames]
+        meta = {
+            "control": control_id,
+            "title": str((control or {}).get("title") or ""),
+            "generated_at": _now_iso(),
+        }
+        try:
+            data = xlsx_export.write_step_workbook(steps, meta)
+        except AdaptersUnavailable as exc:
+            return PlainTextResponse(str(exc), status_code=503)
+        return Response(
+            content=data, media_type=_XLSX_MEDIA,
+            headers={"content-disposition":
+                     f'attachment; filename="{control_id}-steps.xlsx"'},
+        )
+
     # --- Logic sub-route GETs ------------------------------------------------
 
     @app.get("/controls/{control_id}/logic/builder", response_class=HTMLResponse)
@@ -862,6 +1031,7 @@ def register(
                 request,
                 "partials/_pipe_cards.html",
                 {
+                    "control_id": control_id,
                     "nodes": ordered_nodes,
                     "sources": sources,
                     "op_choices": OP_CHOICES,
