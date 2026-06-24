@@ -169,38 +169,6 @@
   </div>
 </form>
 
-<!-- ── Draft with AI ─────────────────────────────────────────────────────── -->
-{% if not raw_python %}
-<div class="card" id="ai-draft-card">
-  <div class="card-head">
-    <h2>Draft with AI</h2>
-  </div>
-  <p class="lead">Let AI draft the Test node's conditions from this control's objective
-    and a sample of the bound source data. The drafted conditions are applied directly
-    into the Test node above — review and edit them, then click "Save pipeline".</p>
-  {% if ai_enabled %}
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-    <button class="btn btn-sm" type="button" id="ai-draft-btn"
-            hx-post="/controls/{{ control_id }}/logic/ai-apply"
-            hx-include="#pipeline-json"
-            hx-target="#pipe-cards"
-            hx-swap="innerHTML"
-            hx-indicator="#ai-draft-card"
-            hx-on::before-request="serializeForAI()"
-            hx-on::after-request="clearAiPanel()">
-      Draft with AI
-    </button>
-  </div>
-  {% else %}
-  <p class="muted">
-    AI authoring is not configured.
-    <a href="/settings/ai">Set up a provider in AI Settings</a> to enable this feature.
-  </p>
-  {% endif %}
-  <div id="ai-draft-panel" style="margin-top:14px;"></div>
-</div>
-{% endif %}
-
 <!-- The whole graph as JSON; the editor script mutates it and the cards read it. -->
 <script id="graph-data" type="application/json">{{ graph_json | safe }}</script>
 <script>
@@ -483,33 +451,6 @@
       });
     }
 
-    // Re-bind after HTMX swaps the cards (ai-apply success path).
-    document.getElementById('pipe-cards').addEventListener('htmx:afterSwap', function () {
-      bindCards(document.getElementById('pipe-cards'));
-    });
-
-    // serializeForAI: called via hx-on::before-request — sync DOM → hidden
-    // field so the current graph is posted to the ai-apply endpoint.
-    window.serializeForAI = function () {
-      serialize();
-      jsonField.value = JSON.stringify(graph);
-    };
-
-    // clearAiPanel: dismiss any previous AI error after a successful apply.
-    window.clearAiPanel = function () {
-      var panel = document.getElementById('ai-draft-panel');
-      if (panel) { panel.innerHTML = ''; }
-    };
-
-    // aiDraftApplied: sync the in-memory graph from the applied draft so that
-    // subsequent add/remove/save operations use the correct node list.
-    document.body.addEventListener('aiDraftApplied', function (evt) {
-      try {
-        var payload = evt.detail && (evt.detail.value !== undefined ? evt.detail.value : evt.detail);
-        var updated = JSON.parse(typeof payload === 'string' ? payload : JSON.stringify(payload));
-        if (updated && updated.nodes) { graph = updated; }
-      } catch (_) {}
-    });
   })();
 </script>
 {% endif %}

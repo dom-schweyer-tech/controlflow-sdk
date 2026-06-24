@@ -774,6 +774,18 @@ def register(
         ctx["logic_tab"] = "builder"
         return templates.TemplateResponse(request, "logic_builder.html", ctx)
 
+    @app.get("/controls/{control_id}/logic/ai", response_class=HTMLResponse)
+    def logic_ai(
+        control_id: str,
+        request: Request,
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> HTMLResponse:
+        root = request.app.state.project_root
+        ctx = _editor_context(request, conn, root, control_id)
+        ctx["active"] = "logic"
+        ctx["logic_tab"] = "ai"
+        return templates.TemplateResponse(request, "logic_ai.html", ctx)
+
     @app.get("/controls/{control_id}/logic/flowchart", response_class=HTMLResponse)
     def logic_flowchart(
         control_id: str,
