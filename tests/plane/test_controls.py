@@ -216,3 +216,74 @@ def test_definition_save_preserves_logic_required_sources(client):
     assert "f2_employees" in after["source_ids"], (
         "source f2_employees was dropped even though the pipeline still needs it"
     )
+
+
+def test_definition_add_source_auto_adds_import_node(client):
+    import json
+
+    _make_source(client, "def_a")
+    _make_source(client, "def_b")
+    cid = "DEFSYNC1"
+    client.post("/controls", data={
+        "id": cid, "title": "Definition sync", "objective": "o", "narrative": "n",
+        "source_ids": ["def_a"],
+    }, follow_redirects=False)
+    graph = {
+        "nodes": [
+            {"id": "imp_a", "type": "import", "source_id": "def_a", "narrative": ""},
+            {"id": "tst", "type": "test", "inputs": ["imp_a"], "narrative": "",
+             "config": {"logic": "all", "severity": "medium", "conditions": []}},
+        ]
+    }
+    client.post(f"/controls/{cid}/logic/builder",
+                data={"pipeline_json": json.dumps(graph)},
+                follow_redirects=False)
+
+    client.post(f"/controls/{cid}", data={
+        "id": cid, "title": "Definition sync", "objective": "o", "narrative": "n",
+        "framework_nist": "",
+        "source_ids": ["def_a", "def_b"],
+    }, follow_redirects=False)
+
+    updated = _get_control(client, cid)
+    import_sources = [
+        n.get("source_id") for n in (updated.get("pipeline") or {}).get("nodes", [])
+        if n.get("type") == "import"
+    ]
+    assert "def_b" in import_sources
+
+
+def test_definition_remove_source_unimports_and_cleans_inputs(client):
+    import json
+
+    _make_source(client, "drop_a")
+    _make_source(client, "drop_b")
+    cid = "DEFSYNC2"
+    client.post("/controls", data={
+        "id": cid, "title": "Definition sync", "objective": "o", "narrative": "n",
+        "source_ids": ["drop_a", "drop_b"],
+    }, follow_redirects=False)
+    graph = {
+        "nodes": [
+            {"id": "imp_a", "type": "import", "source_id": "drop_a", "narrative": ""},
+            {"id": "imp_b", "type": "import", "source_id": "drop_b", "narrative": ""},
+            {"id": "tst", "type": "test", "inputs": ["imp_a", "imp_b"], "narrative": "",
+             "config": {"logic": "all", "severity": "medium", "conditions": []}},
+        ]
+    }
+    client.post(f"/controls/{cid}/logic/builder",
+                data={"pipeline_json": json.dumps(graph)},
+                follow_redirects=False)
+
+    client.post(f"/controls/{cid}", data={
+        "id": cid, "title": "Definition sync", "objective": "o", "narrative": "n",
+        "framework_nist": "",
+        "source_ids": ["drop_a"],
+    }, follow_redirects=False)
+
+    updated = _get_control(client, cid)
+    nodes = (updated.get("pipeline") or {}).get("nodes", [])
+    import_sources = [n.get("source_id") for n in nodes if n.get("type") == "import"]
+    assert "drop_b" not in import_sources
+    test_node = next(n for n in nodes if n.get("id") == "tst")
+    assert "imp_b" not in list(test_node.get("inputs") or [])

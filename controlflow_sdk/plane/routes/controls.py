@@ -307,6 +307,67 @@ def _required_source_ids(existing: dict) -> list[str]:
     return []
 
 
+def _node_id_for_import(nodes: list[dict[str, Any]], source_id: str) -> str:
+    """Pick a stable, unique import-node id for a newly bound source."""
+    used = {str(n.get("id") or "") for n in nodes}
+    base = "".join(ch if ch.isalnum() else "_" for ch in f"imp_{source_id}").strip("_") or "imp"
+    if base not in used:
+        return base
+    i = 2
+    while f"{base}_{i}" in used:
+        i += 1
+    return f"{base}_{i}"
+
+
+def _reconcile_pipeline_imports(
+    pipeline: dict[str, Any] | None,
+    selected_source_ids: list[str],
+) -> dict[str, Any] | None:
+    """Sync Import nodes to the selected Definition sources.
+
+    - Add missing Import nodes for newly selected sources.
+    - Remove Import nodes whose source was de-selected.
+    - Remove dangling ``inputs`` references to deleted Import node ids.
+    """
+    if not isinstance(pipeline, dict):
+        return pipeline
+    nodes = list(pipeline.get("nodes") or [])
+    selected = set(selected_source_ids)
+
+    removed_ids: set[str] = set()
+    kept_nodes: list[dict[str, Any]] = []
+    for n in nodes:
+        if n.get("type") == "import" and n.get("source_id") not in selected:
+            removed_ids.add(str(n.get("id") or ""))
+            continue
+        kept_nodes.append(dict(n))
+
+    if removed_ids:
+        for n in kept_nodes:
+            if isinstance(n.get("inputs"), list):
+                n["inputs"] = [i for i in n["inputs"] if i not in removed_ids]
+
+    import_sources = [
+        str(n.get("source_id"))
+        for n in kept_nodes
+        if n.get("type") == "import" and n.get("source_id")
+    ]
+    missing = [sid for sid in selected_source_ids if sid not in import_sources]
+    for sid in missing:
+        kept_nodes.append(
+            {
+                "id": _node_id_for_import(kept_nodes, sid),
+                "type": "import",
+                "source_id": sid,
+                "narrative": "",
+            }
+        )
+
+    out = dict(pipeline)
+    out["nodes"] = kept_nodes
+    return out
+
+
 def _save_from_form(conn: sqlite3.Connection, form: Any) -> str:
     """Save the Definition form: metadata + sources only.
 
@@ -318,10 +379,12 @@ def _save_from_form(conn: sqlite3.Connection, form: Any) -> str:
     empty logic (test_kind="pipeline", no rule_spec/test_code/pipeline); the
     Logic ▸ Builder derives an Import→Test scaffold on first view.
 
-    Source-desync guard: when saving an existing control, UNION any sources
-    required by the control's logic into the posted source_ids so a needed
-    source is never accidentally dropped (posted first, then any extra logic-
-    required sources not already present — deterministic order).
+    Reconciliation rules for existing controls:
+    - Pipeline controls: reconcile Import nodes to the posted ``source_ids``
+      (select => add Import, de-select => remove Import), then union any
+      remaining logic-required sources (e.g. cross-source ``other_source``).
+    - Non-pipeline controls: preserve existing logic and union logic-required
+      sources into posted ``source_ids`` so needed bindings are never dropped.
     """
     cid = str(form.get("id")).strip()
     nist = [s.strip() for s in str(form.get("framework_nist", "")).split(",") if s.strip()]
@@ -336,6 +399,10 @@ def _save_from_form(conn: sqlite3.Connection, form: Any) -> str:
         rule_spec = existing["rule_spec"]
         test_code = existing["test_code"]
         pipeline = existing["pipeline"]
+        if pipeline:
+            pipeline = _reconcile_pipeline_imports(pipeline, source_ids)
+            existing = dict(existing)
+            existing["pipeline"] = pipeline
         # Union logic-required sources so a needed source is never dropped.
         for sid in _required_source_ids(existing):
             if sid not in source_ids:
