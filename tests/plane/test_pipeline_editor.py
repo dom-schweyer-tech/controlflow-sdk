@@ -1063,3 +1063,54 @@ def test_builder_has_per_gap_insert_affordances_not_only_bottom_toolbar(client):
     # Each node type is offerable from an insert menu.
     for t in ("import", "filter", "join", "custom_python", "test"):
         assert f'data-type="{t}"' in body
+
+
+# ---------------------------------------------------------------------------
+# Task 2: autosave — in-place card swaps for routine edits
+# ---------------------------------------------------------------------------
+
+def test_builder_renders_autosave_status_affordance(client):
+    """The builder page contains the autosave status element and the
+    autosaveSubmit JS helper so that add/remove/insert actions swap only
+    the #pipe-cards region without a full-page reload."""
+    _make_control(client, "C1")
+    body = client.get("/controls/C1/logic/builder").text
+
+    # The status affordance element must be present.
+    assert 'id="autosave-status"' in body, "autosave-status element missing"
+
+    # The JS helper that issues the autosave fetch must be defined.
+    assert "autosaveSubmit" in body, "autosaveSubmit helper missing"
+
+    # Full-page form.submit() must NOT be used for card-mutation actions.
+    # The only legitimate submit path is the explicit Save pipeline button,
+    # which triggers the form's own submit event — not a programmatic .submit().
+    assert "pipeline-form').submit()" not in body, (
+        "found full-page .submit() in card-mutation handlers — "
+        "card mutations should call autosaveSubmit()"
+    )
+
+
+def test_autosave_post_returns_cards_fragment_not_redirect(client):
+    """POST /controls/{id}/logic/builder with autosave=1 returns the
+    pipe-cards HTML fragment (200) instead of a redirect, so the client-side
+    fetch can swap only #pipe-cards without a full-page reload."""
+    _make_source(client, "accounts", b"account_id,is_active\nA1,true\nA2,false\n")
+    _make_control(client, "C1")
+    # A minimal valid pipeline: Import → Test (terminal).
+    graph = {"nodes": [
+        {"id": "imp", "type": "import", "source_id": "accounts",
+         "narrative": "", "config": {}, "inputs": []},
+        {"id": "tst", "type": "test", "inputs": ["imp"],
+         "narrative": "", "config": {"logic": "all", "conditions": []}},
+    ]}
+    resp = client.post(
+        "/controls/C1/logic/builder",
+        data={"pipeline_json": json.dumps(graph), "autosave": "1"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200
+    # Fragment must contain the node cards — not a full page.
+    assert 'data-node="imp"' in resp.text
+    assert 'data-node="tst"' in resp.text
+    assert "<html" not in resp.text
