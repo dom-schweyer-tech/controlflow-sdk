@@ -618,7 +618,9 @@ def register(
             conn.close()
 
     @app.post("/controls/{control_id}/id", response_model=None)
-    async def update_control_id(control_id: str, request: Request) -> HTMLResponse | RedirectResponse:
+    async def update_control_id(
+        control_id: str, request: Request
+    ) -> HTMLResponse | RedirectResponse:
         root = request.app.state.project_root
         conn = connect(root)
         try:
