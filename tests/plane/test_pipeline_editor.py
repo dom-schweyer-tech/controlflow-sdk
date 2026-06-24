@@ -1114,3 +1114,81 @@ def test_autosave_post_returns_cards_fragment_not_redirect(client):
     assert 'data-node="imp"' in resp.text
     assert 'data-node="tst"' in resp.text
     assert "<html" not in resp.text
+
+
+def test_autosave_validation_error_returns_cards_fragment_not_full_page(client):
+    """When autosave=1 and a lint error fires, the server MUST return a 422
+    cards fragment (not the full logic_builder.html page).
+
+    The newly submitted node must remain visible in the fragment with the
+    error surfaced inline — so the author can see and fix it without losing
+    the node they just inserted.  (Issue: full-page 422 drops the DOM node.)
+    """
+    _make_source(client, "je_frag", b"entry_id,amount\nE1,100\n")
+    _make_control(client, "ErrFrag")
+    bad_graph = {"nodes": [
+        {"id": "imp", "type": "import", "source_id": "je_frag",
+         "inputs": [], "config": {}},
+        {"id": "cust", "type": "custom_python", "inputs": ["imp"],
+         "config": {"flavor": "transform",
+                    "code": "rows = open('/etc/passwd').read()"}},
+        {"id": "tst", "type": "test", "inputs": ["cust"],
+         "config": {"logic": "all", "conditions": [],
+                    "item_key_column": "entry_id"}},
+    ]}
+    resp = client.post(
+        "/controls/ErrFrag/logic/builder",
+        data={"pipeline_json": json.dumps(bad_graph), "autosave": "1"},
+        follow_redirects=False,
+    )
+    # Must still signal an error (422), not a success or redirect.
+    assert resp.status_code == 422, (
+        f"autosave error must return 422, got {resp.status_code}"
+    )
+    # The response MUST be a fragment, not a full HTML page.
+    assert "<html" not in resp.text, (
+        "autosave error should return a cards fragment, not the full HTML page"
+    )
+    # All submitted nodes must remain visible so the author can fix the error.
+    assert 'data-node="imp"' in resp.text
+    assert 'data-node="cust"' in resp.text
+    # The lint error must be surfaced inside the fragment.
+    assert _OFFRAMP_STABLE in resp.text, (
+        "lint error must appear in the autosave error fragment"
+    )
+
+
+def test_autosave_js_updates_cards_on_non_200_response(client):
+    """The autosaveSubmit JS must update #pipe-cards even when the server
+    returns a non-200 status (e.g. 422 validation error), so the newly
+    inserted node stays visible and can be configured by the author.
+
+    The old ``if (!resp.ok) { throw`` pattern discards the response body on
+    any non-2xx status, which causes the browser to silently drop the node.
+    """
+    _make_control(client, "JS1")
+    body = client.get("/controls/JS1/logic/builder").text
+    # The throw-on-non-OK guard must be absent.
+    assert "if (!resp.ok) { throw" not in body, (
+        "autosaveSubmit must not throw on non-OK status; "
+        "non-200 responses must still update #pipe-cards"
+    )
+
+
+def test_autosave_js_sequence_guard_present(client):
+    """The autosaveSubmit JS must include a sequence counter guard so only
+    the newest in-flight autosave response is applied to #pipe-cards.
+
+    Without the guard, two rapid autosave requests can resolve out of order
+    and the older (stale) response clobbers the newer one.
+    """
+    _make_control(client, "JS2")
+    body = client.get("/controls/JS2/logic/builder").text
+    assert "_autosaveSeq" in body, (
+        "autosaveSubmit must define a sequence counter (_autosaveSeq) "
+        "to prevent concurrent autosave responses from clobbering the DOM"
+    )
+    assert "seq !== _autosaveSeq" in body, (
+        "autosaveSubmit must check the sequence counter before applying "
+        "a response (seq !== _autosaveSeq guard)"
+    )

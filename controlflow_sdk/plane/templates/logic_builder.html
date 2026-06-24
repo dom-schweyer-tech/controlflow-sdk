@@ -285,7 +285,9 @@
     // Callers must set jsonField.value = JSON.stringify(graph) before calling.
     // The Save pipeline button continues to use the form's native submit event,
     // which issues a full-page POST (no autosave=1) and follows the redirect.
+    var _autosaveSeq = 0;  // monotonic counter — guards against stale responses
     function autosaveSubmit() {
+      var seq = ++_autosaveSeq;  // claim this request's slot
       var statusEl = document.getElementById('autosave-status');
       var form = document.getElementById('pipeline-form');
       var scrollY = window.scrollY;
@@ -295,23 +297,35 @@
       fd.append('autosave', '1');
       fetch(form.action, { method: 'POST', body: fd })
         .then(function (resp) {
-          if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
-          return resp.text();
+          // Read the body regardless of HTTP status — a 422 carries the
+          // cards fragment with inline errors and must still update the DOM.
+          return resp.text().then(function (html) {
+            return { ok: resp.ok, html: html };
+          });
         })
-        .then(function (html) {
+        .then(function (result) {
+          if (seq !== _autosaveSeq) { return; }  // stale response — discard
           var cardsEl = document.getElementById('pipe-cards');
-          cardsEl.innerHTML = html;
+          cardsEl.innerHTML = result.html;
           window.scrollTo(0, scrollY);
           bindCards(cardsEl);
-          if (statusEl) {
-            statusEl.textContent = 'Saved';
-            statusEl.className = 'autosave-saved';
-            setTimeout(function () {
-              if (statusEl.className === 'autosave-saved') { statusEl.textContent = ''; }
-            }, 2000);
+          if (!result.ok) {
+            if (statusEl) {
+              statusEl.textContent = 'Validation error';
+              statusEl.className = 'autosave-error';
+            }
+          } else {
+            if (statusEl) {
+              statusEl.textContent = 'Saved';
+              statusEl.className = 'autosave-saved';
+              setTimeout(function () {
+                if (statusEl.className === 'autosave-saved') { statusEl.textContent = ''; }
+              }, 2000);
+            }
           }
         })
         .catch(function (err) {
+          if (seq !== _autosaveSeq) { return; }  // stale request — discard
           if (statusEl) {
             statusEl.textContent = 'Error saving — ' + err.message;
             statusEl.className = 'autosave-error';
