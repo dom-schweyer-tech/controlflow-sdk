@@ -96,6 +96,15 @@
     border-radius: var(--radius-card); background: var(--bg-surface-1);
     color: var(--text-secondary); font-size: 14px;
   }
+
+  /* ── autosave status affordance ─────────────────────────────────────── */
+  #autosave-status {
+    font-size: 12px; margin-left: 8px; color: var(--text-tertiary);
+    transition: color .15s;
+  }
+  #autosave-status.autosave-saving { color: var(--text-secondary); }
+  #autosave-status.autosave-saved  { color: var(--status-success); }
+  #autosave-status.autosave-error  { color: var(--status-critical); }
 </style>
 {% endblock %}
 {% block body %}
@@ -149,6 +158,7 @@
 
     <div class="page-actions">
       <button class="btn btn-primary" type="submit">Save pipeline</button>
+      <span id="autosave-status" aria-live="polite"></span>
       <a class="btn btn-sm" href="/controls/{{ control_id }}/logic/export-steps.xlsx">
         Export step workbook (.xlsx)</a>
     </div>
@@ -271,6 +281,58 @@
       graph.nodes = nodes;
     }
 
+    // ── autosave: post the graph and swap only #pipe-cards ───────────────
+    // Callers must set jsonField.value = JSON.stringify(graph) before calling.
+    // The Save pipeline button continues to use the form's native submit event,
+    // which issues a full-page POST (no autosave=1) and follows the redirect.
+    var _autosaveSeq = 0;  // monotonic counter — guards against stale responses
+    function autosaveSubmit() {
+      var seq = ++_autosaveSeq;  // claim this request's slot
+      var statusEl = document.getElementById('autosave-status');
+      var form = document.getElementById('pipeline-form');
+      var scrollY = window.scrollY;
+      if (statusEl) { statusEl.textContent = 'Saving\u2026'; statusEl.className = 'autosave-saving'; }
+      var fd = new FormData();
+      fd.append('pipeline_json', jsonField.value);
+      fd.append('autosave', '1');
+      fetch(form.action, { method: 'POST', body: fd })
+        .then(function (resp) {
+          // Read the body regardless of HTTP status — a 422 carries the
+          // cards fragment with inline errors and must still update the DOM.
+          return resp.text().then(function (html) {
+            return { ok: resp.ok, html: html };
+          });
+        })
+        .then(function (result) {
+          if (seq !== _autosaveSeq) { return; }  // stale response — discard
+          var cardsEl = document.getElementById('pipe-cards');
+          cardsEl.innerHTML = result.html;
+          window.scrollTo(0, scrollY);
+          bindCards(cardsEl);
+          if (!result.ok) {
+            if (statusEl) {
+              statusEl.textContent = 'Validation error';
+              statusEl.className = 'autosave-error';
+            }
+          } else {
+            if (statusEl) {
+              statusEl.textContent = 'Saved';
+              statusEl.className = 'autosave-saved';
+              setTimeout(function () {
+                if (statusEl.className === 'autosave-saved') { statusEl.textContent = ''; }
+              }, 2000);
+            }
+          }
+        })
+        .catch(function (err) {
+          if (seq !== _autosaveSeq) { return; }  // stale request — discard
+          if (statusEl) {
+            statusEl.textContent = 'Error saving — ' + err.message;
+            statusEl.className = 'autosave-error';
+          }
+        });
+    }
+
     function typed(v) {
       if (v === '') { return ''; }
       var low = v.toLowerCase();
@@ -291,7 +353,7 @@
       serialize();
       jsonField.value = JSON.stringify(graph);
       // Re-render server-side so cards/diagram/counts reflect the new graph.
-      document.getElementById('pipeline-form').submit();
+      autosaveSubmit();
     }
 
     function newNode(type) {
@@ -320,7 +382,7 @@
         });
       }
       jsonField.value = JSON.stringify(graph);
-      document.getElementById('pipeline-form').submit();
+      autosaveSubmit();
     }
 
     // Insert affordances are delegated on #pipe-cards so they keep working after
@@ -384,7 +446,7 @@
             node.config.conditions = node.config.conditions || [];
             node.config.conditions.push({ column: '', op: 'eq', value: '' });
             jsonField.value = JSON.stringify(graph);
-            document.getElementById('pipeline-form').submit();
+            autosaveSubmit();
           }
         });
       });
@@ -399,7 +461,7 @@
               n.inputs = (n.inputs || []).filter(function (i) { return i !== id; });
             });
             jsonField.value = JSON.stringify(graph);
-            document.getElementById('pipeline-form').submit();
+            autosaveSubmit();
           });
         }
       });
