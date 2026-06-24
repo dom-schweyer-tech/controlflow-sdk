@@ -195,7 +195,7 @@ def test_settings_post_persists_selection(client):
 
 
 # --------------------------------------------------------------------------- #
-# Editor affordance gating  (Logic ▸ Builder tab, not the Definition page)
+# Editor affordance gating  (Logic ▸ AI tab, not the Definition page)
 # --------------------------------------------------------------------------- #
 def _make_control(client, source_id="payments") -> str:
     """Create a minimal control bound to *source_id* and return its id."""
@@ -209,25 +209,29 @@ def _make_control(client, source_id="payments") -> str:
     return "AI-01"
 
 
-def test_editor_hides_draft_when_not_configured(client):
+def test_ai_tab_hides_draft_when_not_configured(client):
     _make_source(client)
     cid = _make_control(client)
-    page = client.get(f"/controls/{cid}/logic/builder").text
+    page = client.get(f"/controls/{cid}/logic/ai").text
     # Not configured → the affordance links to settings rather than posting a draft.
     assert 'href="/settings/ai"' in page
     assert 'hx-post="/controls/ai/draft"' not in page
 
 
-def test_editor_shows_draft_when_configured(client, monkeypatch):
+def test_ai_tab_shows_draft_when_configured(client, monkeypatch):
     _make_source(client)
     cid = _make_control(client)
     _configure_ai(client)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    page = client.get(f"/controls/{cid}/logic/ai").text
+    assert 'hx-post="/controls/ai/draft"' in page
+
+
+def test_builder_tab_no_longer_renders_draft_with_ai_card(client):
+    _make_source(client)
+    cid = _make_control(client)
     page = client.get(f"/controls/{cid}/logic/builder").text
-    # F3: the button now posts to the per-control ai-apply endpoint so the
-    # drafted conditions are applied directly into the Test node (not previewed
-    # in a separate panel).
-    assert f'hx-post="/controls/{cid}/logic/ai-apply"' in page
+    assert "Draft with AI" not in page
 
 
 # --------------------------------------------------------------------------- #
