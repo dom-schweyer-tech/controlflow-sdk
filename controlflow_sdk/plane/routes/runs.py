@@ -5,9 +5,11 @@ from collections.abc import Callable, Generator
 from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from controlflow_sdk.project.loader import ProjectError
+from controlflow_sdk.runner.execute import RunnerError
 from controlflow_sdk.store import repo
 from controlflow_sdk.store.db import connect
 from controlflow_sdk.store.run_service import run_control_in_store
@@ -19,12 +21,22 @@ def register(
     get_conn: Callable[..., Generator[sqlite3.Connection, None, None]],
 ) -> None:
     @app.post("/controls/{control_id}/run")
-    def run(control_id: str, request: Request) -> RedirectResponse:
+    def run(control_id: str, request: Request) -> Response:
         root = request.app.state.project_root
         executed_at = datetime.now(UTC).isoformat()
         conn = connect(root)
         try:
             rec = run_control_in_store(conn, root, control_id, executed_at)
+        except (RunnerError, ProjectError, KeyError, IndexError) as exc:
+            # A half-authored control (no bound source, no logic) must degrade to a
+            # friendly "not ready" page — never a 500 (2026-06-27 review).
+            project = repo.get_project(conn) or {"name": ""}
+            return templates.TemplateResponse(
+                request,
+                "run_error.html",
+                {"project": project, "control_id": control_id, "message": str(exc)},
+                status_code=422,
+            )
         finally:
             conn.close()
         return RedirectResponse(
