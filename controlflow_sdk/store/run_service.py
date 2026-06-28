@@ -271,7 +271,9 @@ def _run_multi_procedure(
         )
         per_proc_runs.append((
             ProcedureSpec(
+                code=proc.code,
                 title=proc.name or display_code,
+                assertion=proc.assertion,
                 narrative=proc.narrative,
                 test_code=display_code,
                 threshold=proc_threshold,

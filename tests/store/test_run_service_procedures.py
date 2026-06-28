@@ -84,3 +84,17 @@ def test_procedure_rollup_distinct_examined_and_merged(tmp_path: Path):
     violations = repo.get_run(conn, p1["run_id"])["violations"]
     a = [v for v in violations if v["item_key"] == "A"][0]
     assert sorted(a["details"]["checks"]) == ["no approval", "preparer=approver"]
+
+
+def test_procedure_code_assertion_flow_to_workpaper(tmp_path: Path):
+    """code/assertion must flow from ProcedureDef → ProcedureSpec → Workpaper.Procedure."""
+    from controlflow_sdk.render.html import render_html
+    from controlflow_sdk.store.run_service import run_control_in_store
+
+    conn = _seed(tmp_path)
+    run_control_in_store(conn, tmp_path, "gl1", "2026-06-28T00:00:00Z")
+
+    # Read the rendered HTML workpaper — confirms the full pipeline wired correctly.
+    html = (tmp_path / "target" / "workpapers" / "gl1.html").read_text(encoding="utf-8")
+    assert "P1" in html, "procedure code 'P1' must appear in the rendered workpaper"
+    assert "Segregation of Duties" in html, "assertion must appear in the rendered workpaper"
