@@ -40,9 +40,20 @@ to the new DOM. Treat the control plane's e2e browser smoke as a **load-bearing*
 HTMX-swap changes — never dismiss an e2e strict-mode/locator failure as flaky without reading
 it; it is usually reporting that the assembled DOM changed.
 
+**This extends beyond HTMX DOM swaps:** also re-run the browser gate and **re-derive its
+assertions** when you change a **run-aggregation or render semantic**, not only when the DOM
+structure changes. A pre-existing e2e test is the thing that catches it. (2026-06-28,
+procedures: making the control-level aggregate **dedupe violations by item-key** flipped a
+dashboard "Failed" tile 2→1, and rendering `{code} · {title}` instead of `P{i}: {title}`
+broke a multi-procedure heading regex — both were **stale-test fixes**, not bugs. Confirm the
+new value is the correct one, then update the expectation; never edit an assertion whose new
+value looks wrong — [[0035]].)
+
 ## Reference
 
 - `tests/e2e/test_smoke.py` — the browser gate (issue #13).
+- `tests/e2e/test_multi_procedure.py` — the 2026-06-28 recurrence: aggregation/render-semantic
+  changes (item-key dedupe; `{code} · {title}` headings) made its count/heading assertions stale.
 - `controlflow_sdk/plane/templates/partials/rule_builder.html` — the `hx-get` / `hx-target` /
   `hx-swap` wiring whose behaviour change triggered this.
 - Builds on [0007](0007-control-plane-editors-are-server-rendered-sub-route-tabs.md)
