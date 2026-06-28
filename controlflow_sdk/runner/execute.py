@@ -179,6 +179,11 @@ def run_control(
         sources_by_id[binding.id] = pop
 
     # ── 2. Select the primary population (first bound source) ─────────────────
+    if not populations:
+        raise RunnerError(
+            f"Control '{control.id}' has no bound data source — "
+            "bind a source before running."
+        )
     primary: Population = populations[0]
 
     # ── 3. Load and execute the author callable OR evaluate the rule spec ────
