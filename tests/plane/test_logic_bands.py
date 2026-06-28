@@ -8,7 +8,12 @@ import io
 import json
 
 from controlflow_sdk.pipeline.model import parse_pipeline
-from controlflow_sdk.plane.routes.pipeline import _card_bands, _card_vm, _procedure_context
+from controlflow_sdk.plane.routes.pipeline import (
+    _card_bands,
+    _card_vm,
+    _diagram,
+    _procedure_context,
+)
 
 
 def _vms(pipeline):
@@ -77,3 +82,39 @@ def test_builder_get_renders_sectioned_details_ui(client):
     assert "data-proc-head" in page
     # The old separate Procedures panel is gone.
     assert "data-proc-panel" not in page
+
+
+def _forked():
+    return parse_pipeline({
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "s"},
+            {"id": "t1", "type": "test", "inputs": ["src"],
+             "config": {"procedure_id": "p1", "conditions": [{"column": "a", "op": "not_empty"}]}},
+            {"id": "t2", "type": "test", "inputs": ["src"],
+             "config": {"procedure_id": "p2", "conditions": [{"column": "a", "op": "not_empty"}]}},
+        ],
+        "procedures": [
+            {"id": "p1", "code": "P1", "name": "One", "position": 0},
+            {"id": "p2", "code": "P2", "name": "Two", "position": 1},
+        ],
+    })
+
+
+def test_diagram_exposes_procedure_bands():
+    d = _diagram(_forked(), {})
+    keys = [b["key"] for b in d["bands"]]
+    assert "__inputs__" in keys and "p1" in keys and "p2" in keys
+    for b in d["bands"]:
+        assert b["row_start"] <= b["row_end"]
+        assert b["collapsed"] is False
+
+
+def test_diagram_collapsed_band_emits_summary_box():
+    d = _diagram(_forked(), {}, collapsed=frozenset({"p2"}))
+    p2 = next(b for b in d["bands"] if b["key"] == "p2")
+    assert p2["collapsed"] is True
+    # The collapsed band's private node (t2) is replaced by a single summary box.
+    assert not any(box["id"] == "t2" for box in d["boxes"])
+    assert any(box.get("summary") and box.get("band") == "p2" for box in d["boxes"])
+    # The non-collapsed band's boxes still render.
+    assert any(box["id"] == "t1" for box in d["boxes"])
