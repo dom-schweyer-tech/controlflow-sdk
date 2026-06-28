@@ -2,7 +2,7 @@
 
 > Present-state inventory of what the SDK **ships now**. Planned/unbuilt work lives in GitHub issues,
 > not here. Update a row when a surface ships or changes; remove a row when a surface is retired.
-> Last updated: 2026-06-24.
+> Last updated: 2026-06-28.
 
 | Surface | Type | What it does |
 | --- | --- | --- |
@@ -18,7 +18,7 @@
 | Control plane — Run view | view | Per-run results (totals + violations table) with the **rendered workpaper embedded**. |
 | Control plane — Run history | view | Per-control run history (`/controls/{id}/history`, linked from the dashboard + control editor): every run with pass-rate/exception counts, each row linking to its run view, plus an inline-SVG **trend chart** (pass-rate line + per-run exception bars with labeled axes). Read-only over stored runs. |
 | Control plane — Export | view | Produces the import bundle (zip) for the ControlFlow app; validates against the contract. |
-| Control plane — Settings | view | A **Settings** hub (`/settings`) linking engagement settings — **rename** the current engagement (single-engagement by design) — and the AI provider picker (`/settings/ai`, which names the exact env var per provider). |
+| Control plane — Settings | view | A **Settings** hub (`/settings`) linking engagement settings — **rename** the current engagement (single-engagement by design) — and the AI provider picker (`/settings/ai`, which names the exact env var per provider). A **Danger zone** offers a confirm-guarded **Reset to demo data** (`POST /settings/reset-demo` → `reset_to_demo`): wipes the engagement, clears `data/` + `target/`, reloads the Northwind demo, and preserves the AI config + update-check toggle — one-click recovery from a corrupted/wedged store. |
 | Control plane — Updates / upgrade | view + action | **Settings ▸ Updates** shows the installed version + detected install method and an **opt-in** "check for updates on launch" toggle (default OFF — preserves zero egress) plus a manual **Check now**. When a newer version exists, a dashboard banner offers **one-click self-upgrade**: the app detects the install method (git checkout → `git pull` + reinstall · pipx → `pipx upgrade` · pip → `pip install -U`), spawns a detached helper, and shuts down for a manual re-run. The same routine is the `cflow upgrade [--check] [--yes]` CLI. No bundle impact. |
 | `cflow import <yaml> [--into <dir>]` | CLI | One-time import of a YAML project into `controlplane.db`. |
 | `cflow run [dir] [--control] [--at]` | CLI | Run controls over the store, full-population; write workpapers + evidence; persist runs. |
