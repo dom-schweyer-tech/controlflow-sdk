@@ -892,10 +892,11 @@ def _seed_forked_t8(client):
     _make_control(client, "T8")
 
 
-def test_forked_builder_renders_both_test_cards_with_proc_title_and_threshold_fields(client):
+def test_forked_builder_renders_both_test_cards(client):
     """GET /controls/T8/logic/builder for a forked 2-terminal control must:
     - render BOTH Test cards (data-node="a" and data-node="b")
-    - each Test card must carry data-proc-title, data-threshold-pct, data-threshold-count inputs
+    - Test node cards must NOT carry the vestigial data-proc-title / threshold inputs
+      (those fields moved to the procedure section header in Task 2)
     """
     _seed_forked_t8(client)
     graph = _forked_graph_with_titles()
@@ -910,14 +911,10 @@ def test_forked_builder_renders_both_test_cards_with_proc_title_and_threshold_fi
     assert 'data-node="a"' in html, "Test card 'a' not found in builder"
     assert 'data-node="b"' in html, "Test card 'b' not found in builder"
 
-    # Both cards have the new procedure-title and threshold inputs.
-    assert "data-proc-title" in html, "data-proc-title attribute missing from Test card"
-    assert "data-threshold-pct" in html, "data-threshold-pct attribute missing from Test card"
-    assert "data-threshold-count" in html, "data-threshold-count attribute missing from Test card"
-
-    # Saved titles round-trip back into the rendered value attributes.
-    assert 'value="High-value items"' in html, "Procedure title 'High-value items' not rendered"
-    assert 'value="Low-value items"' in html, "Procedure title 'Low-value items' not rendered"
+    # Vestigial procedure-identity fields are absent from the node cards.
+    assert "data-proc-title" not in html, "data-proc-title should be gone from Test node cards"
+    assert "data-threshold-pct" not in html, "data-threshold-pct should be gone"
+    assert "data-threshold-count" not in html, "data-threshold-count should be gone"
 
 
 def test_forked_builder_post_saves_and_roundtrips_titles(client):
@@ -982,11 +979,13 @@ def test_single_terminal_back_compat(client):
     r = _save_pipeline(client, "BT1", graph)
     assert r.status_code in (302, 303), f"single-terminal save failed: {r.status_code}"
 
-    # The builder must render with the new inputs present (but empty).
+    # The builder must render cleanly without the vestigial proc-title / threshold inputs.
     html = client.get("/controls/BT1/logic/builder").text
-    assert "data-proc-title" in html, "data-proc-title missing on single-terminal card"
-    assert "data-threshold-pct" in html, "data-threshold-pct missing on single-terminal card"
-    assert "data-threshold-count" in html, "data-threshold-count missing on single-terminal card"
+    assert "data-severity" in html, "data-severity missing on single-terminal card"
+    assert "data-procedure" in html, "data-procedure missing on single-terminal card"
+    assert "data-proc-title" not in html, "data-proc-title should be gone from Test node cards"
+    assert "data-threshold-pct" not in html, "data-threshold-pct should be gone"
+    assert "data-threshold-count" not in html, "data-threshold-count should be gone"
 
     # The flowchart marks the single terminal correctly.
     from controlflow_sdk.pipeline.model import parse_pipeline

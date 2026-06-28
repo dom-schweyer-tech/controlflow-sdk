@@ -184,6 +184,38 @@ def test_builder_get_renders_procedure_narrative_field(client):
     assert "Reviewer independence" in page
 
 
+def test_test_node_card_has_no_procedure_identity_fields(client):
+    """The Test node card carries step mechanics only — the 'Procedure title' and
+    per-node Threshold fields moved to the procedure header. The 'Belongs to'
+    selector and Severity stay."""
+    csv = b"user_id,can_create\nU1,true\nU2,\n"
+    client.post("/sources", data={"source_id": "users", "format": "csv"},
+                files={"file": ("users.csv", io.BytesIO(csv), "text/csv")},
+                follow_redirects=False)
+    client.post("/controls", data={"id": "c1", "title": "C1", "objective": "o",
+                "narrative": "n", "source_ids": ["users"], "failure_threshold_count": "0"},
+                follow_redirects=False)
+    graph = {
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "users"},
+            {"id": "tst", "type": "test", "inputs": ["src"],
+             "config": {"logic": "all", "procedure_id": "p1",
+                        "conditions": [{"column": "can_create", "op": "not_empty"}]}},
+        ],
+        "procedures": [{"id": "p1", "code": "P1", "name": "One", "position": 0}],
+    }
+    client.post("/controls/c1/logic/builder",
+                data={"pipeline_json": json.dumps(graph)}, follow_redirects=False)
+    page = client.get("/controls/c1/logic/builder").text
+    # Vestigial procedure fields are gone from every Test node card and the serializer.
+    assert "data-proc-title" not in page
+    assert "data-threshold-pct" not in page
+    assert "data-threshold-count" not in page
+    # Genuine step mechanics remain.
+    assert "data-procedure" in page   # "Belongs to" selector
+    assert "data-severity" in page
+
+
 def test_builder_get_degrades_gracefully_on_partial_pipeline(
     client: TestClient, engagement: Path
 ) -> None:
