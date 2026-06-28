@@ -317,10 +317,10 @@
       });
     }
 
-    // ── Procedures panel: add / remove rows + keep every Test's Procedure ▾ in
-    // sync. A new procedure is selectable on the Test cards immediately (we inject
-    // its <option> into each [data-procedure]) — no server round-trip needed; the
-    // mapping is persisted when the author clicks Save (serializeProcedures()).
+    // ── Procedure section headers: add / remove sections + keep every Test's
+    // "Belongs to" ▾ in sync. A new procedure is selectable on the Test cards
+    // immediately (we inject its <option> into each [data-procedure]) — no server
+    // round-trip needed; the mapping is persisted on Save (serializeProcedures()).
     function procOptionLabel(code, name) {
       return (code || '') + ' · ' + (name || '');
     }

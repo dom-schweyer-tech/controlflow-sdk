@@ -7,10 +7,6 @@ from controlflow_sdk.pipeline.model import parse_pipeline
 from controlflow_sdk.pipeline.procedures import effective_procedures, group_nodes_by_band
 
 
-def _topo_index(pipeline):
-    return {n.id: i for i, n in enumerate(pipeline.topological())}
-
-
 def test_shared_import_and_private_branches():
     # src feeds two tests in two procedures → src shared, each test private.
     pipe = parse_pipeline({

@@ -665,12 +665,12 @@ def _ai_apply_error(
 # ---------------------------------------------------------------------------
 
 def _procedure_context(pipeline: Pipeline | None) -> dict[str, Any]:
-    """Procedure view-model for the Builder panel, per-Test selector and chips.
+    """Procedure view-model for the Builder section headers, per-Test selector and chips.
 
-    Returns three keys used by ``_procedures_panel.html`` / ``_pipe_node.html``:
+    Returns three keys used by ``_pipe_cards.html`` section headers / ``_pipe_node.html``:
 
     - ``procedures`` — the *effective* procedures (author-defined plus one-per-orphan
-      terminal), each with its position color; this is the panel + the selector list.
+      terminal), each with its position color; this is the section-header + selector list.
     - ``node_procedures`` — ``{node_id: [{id, code, color}]}`` derived membership chips.
     - ``selected_procedure_for`` — ``{test_node_id: effective_owning_procedure_id}``.
       Pre-selecting the **effective** owner (not just ``config['procedure_id']``) is
