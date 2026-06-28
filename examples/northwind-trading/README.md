@@ -14,7 +14,7 @@ All data is **frozen as of 2026-03-31** — the control execution date. This ens
 
 ## The Controls
 
-Eight production-ready audit controls span financial, IT access, and procurement domains:
+Nine production-ready audit controls span financial, IT access, and procurement domains:
 
 | Control ID | Domain | Data Sources | NIST Ref | What It Flags | Exceptions |
 |---|---|---|---|---|---|
