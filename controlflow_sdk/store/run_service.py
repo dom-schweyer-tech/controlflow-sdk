@@ -294,14 +294,11 @@ def _run_multi_procedure(
     (wp_dir / f"{control.id}.html").write_text(render_html(wp), encoding="utf-8")
     (wp_dir / f"{control.id}.md").write_text(render_markdown(wp), encoding="utf-8")
 
-    # Control-level aggregate: distinct-examined across ALL tests + merged violations.
-    all_tests = [t for proc in effective_procedures(pipeline)
-                 for t in tests_for_procedure(pipeline, proc.id)]
-    agg_population = _distinct_examined(node_frames, all_tests)
+    # Evidence: union of all procedures' violations (lossless re-merge keeps each
+    # item's contributing check labels).
     all_violations = _merge_violations(
         [("", [v for _, run in per_proc_runs for v in run.violations])]
     )
-
     (ev_dir / f"{control.id}-violations.json").write_text(
         json.dumps([v.to_dict() for v in all_violations], indent=2),
         encoding="utf-8",
@@ -314,8 +311,15 @@ def _run_multi_procedure(
         repo.insert_run(conn, empty)
         return empty
 
+    # Single-procedure pipeline → exactly ONE persisted run (the procedure run itself,
+    # tagged with its procedure_id); no redundant ``procedure_id=""`` aggregate. A
+    # multi-procedure control additionally persists a control-level aggregate run carrying
+    # the distinct-examined population across ALL checks of ALL procedures + merged violations.
     union_run = per_proc_runs[0][1]
-    if len(per_proc_runs) != 1 or agg_population is not None:
+    if len(per_proc_runs) > 1:
+        all_tests = [t for proc in effective_procedures(pipeline)
+                     for t in tests_for_procedure(pipeline, proc.id)]
+        agg_population = _distinct_examined(node_frames, all_tests)
         union_run = RunRecord(
             control_id=control.id,
             executed_at=executed_at,
