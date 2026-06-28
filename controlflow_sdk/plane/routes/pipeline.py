@@ -302,19 +302,19 @@ def _materialize_full(
     """Best-effort ``{node_id: DataFrame}`` over the full population (cached).
 
     Returns ``{}`` when a source is unbound/missing or the probe fails — never raises
-    into the request (learning 0013).
+    into the request (learning 0013). The preview is best-effort and feeds only the
+    badges/inspector, never the real run, so ANY failure degrades to ``{}``.
     """
-    from controlflow_sdk.pipeline.materialize import MaterializeError, materialize_steps
-    from controlflow_sdk.rules.spec import RuleSpecError
+    from controlflow_sdk.pipeline.materialize import materialize_steps
 
-    sids = pipeline.import_source_ids()
-    frames = _load_full_frames(conn, root, sids)
-    versions = _source_versions(conn, root, sids)
     try:
+        sids = pipeline.import_source_ids()
+        frames = _load_full_frames(conn, root, sids)
+        versions = _source_versions(conn, root, sids)
         return materialize_steps(
             pipeline, frames, source_versions=versions, cache=_STEP_CACHE
         )
-    except (MaterializeError, RuleSpecError):
+    except Exception:  # noqa: BLE001 — preview only; never raise into the request (0013)
         return {}
 
 
@@ -658,38 +658,45 @@ def register(
     ) -> HTMLResponse:
         root = request.app.state.project_root
         control = repo.get_control(conn, control_id)
-        pipeline = _pipeline_for_view(control)
         ctx: dict[str, Any] = {
             "project": repo.get_project(conn) or {"name": ""},
             "control": control,
             "control_id": control_id, "node_id": node_id,
             "frame_available": False, "reason": "This step is not computable yet.",
         }
-        if pipeline is not None:
-            try:
-                node = pipeline.node(node_id)
-                ctx["step_label"] = _node_label(node)
-            except KeyError:
-                node = None
-            steps = _materialize_full(conn, root, pipeline)
-            frame = steps.get(node_id)
-            if frame is not None:
-                total = len(frame)
-                page = max(1, page)
-                page_count = max(1, (total + _STEP_PAGE - 1) // _STEP_PAGE)
-                page = min(page, page_count)
-                start = (page - 1) * _STEP_PAGE
-                window = frame.iloc[start:start + _STEP_PAGE]
-                ctx.update({
-                    "frame_available": True,
-                    "header": [str(c) for c in frame.columns],
-                    "rows": [[("" if pd_isna(v) else str(v)) for v in row]
-                             for row in window.itertuples(index=False, name=None)],
-                    "total": total, "page": page, "page_count": page_count,
-                    "start1": start + 1, "end1": start + len(window),
-                })
-            elif not pipeline.import_source_ids() or node is not None:
-                ctx["reason"] = "Bind a data source (and complete this step) to inspect it."
+        # The inspector is best-effort over a derived/in-progress graph: any
+        # unexpected failure (parse, materialize, paging) degrades to a friendly
+        # page — never a 500 (learning 0013; 2026-06-27 review).
+        try:
+            pipeline = _pipeline_for_view(control)
+            if pipeline is not None:
+                try:
+                    node = pipeline.node(node_id)
+                    ctx["step_label"] = _node_label(node)
+                except KeyError:
+                    node = None
+                steps = _materialize_full(conn, root, pipeline)
+                frame = steps.get(node_id)
+                if frame is not None:
+                    total = len(frame)
+                    page = max(1, page)
+                    page_count = max(1, (total + _STEP_PAGE - 1) // _STEP_PAGE)
+                    page = min(page, page_count)
+                    start = (page - 1) * _STEP_PAGE
+                    window = frame.iloc[start:start + _STEP_PAGE]
+                    ctx.update({
+                        "frame_available": True,
+                        "header": [str(c) for c in frame.columns],
+                        "rows": [[("" if pd_isna(v) else str(v)) for v in row]
+                                 for row in window.itertuples(index=False, name=None)],
+                        "total": total, "page": page, "page_count": page_count,
+                        "start1": start + 1, "end1": start + len(window),
+                    })
+                elif not pipeline.import_source_ids() or node is not None:
+                    ctx["reason"] = "Bind a data source (and complete this step) to inspect it."
+        except Exception:  # noqa: BLE001 — never 500 the inspector (learning 0013)
+            ctx["frame_available"] = False
+            ctx["reason"] = "This step can't be inspected right now."
         return templates.TemplateResponse(request, "step_data.html", ctx)
 
     # --- Step export routes --------------------------------------------------
