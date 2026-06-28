@@ -43,9 +43,9 @@ Notes on tes1 authoring approach:
   "Save pipeline" would after setting up tes1 correctly.
 
 Selector notes (grounded against live rendered HTML):
-- Proc-title input:       ``[data-proc-title]`` (inside [data-node] card)
-- Threshold count input:  ``[data-threshold-count]``
-- Condition column:       ``[data-cond-col]``
+- Proc-name input (header):   ``[data-proc-head][data-proc-id="<id>"] [data-proc-name]``
+- Threshold count (header):   ``[data-proc-head][data-proc-id="<id>"] [data-proc-count]``
+- Condition column:           ``[data-cond-col]``
 - Condition op:           ``[data-cond-op]``
 - Condition value:        ``[data-cond-val]``
 - Input select:           ``[data-input]`` (upstream node selector)
@@ -105,11 +105,11 @@ def test_author_run_export_two_procedure_control(
     expect(import_card.locator("[data-source]")).to_have_value("mpusers")
 
     # ── 5. Author Test node "tst" (Branch A — passes its threshold) ─────────
-    #    Set proc-title + threshold_count=5 BEFORE clicking add-cond so they
-    #    are serialised and saved in the first add-cond POST.
+    #    Set severity/desc/itemkey BEFORE clicking add-cond so they are
+    #    serialised and saved in the first add-cond POST. proc-title and
+    #    failure_threshold_count are injected via the complete_graph in step 6
+    #    (they live in the procedure section header, not the Test node card).
     tst = page.locator('[data-node="tst"]')
-    tst.locator("[data-proc-title]").fill("High pass rate")
-    tst.locator("[data-threshold-count]").fill("5")
     tst.locator("[data-severity]").select_option("high")
     tst.locator("[data-desc]").fill("User {user_id} flagged in branch A")
     tst.locator("[data-itemkey]").select_option("user_id")
@@ -198,15 +198,18 @@ def test_author_run_export_two_procedure_control(
     expect(page.locator('[data-node="tst"]')).to_be_visible()
     expect(page.locator('[data-node="tes1"]')).to_be_visible()
 
-    # Confirm tes1's proc-title was persisted.
+    # Confirm the procedure section headers derive their names + thresholds from
+    # node config.title / config.failure_threshold_count (auto-procedures — no
+    # explicit procedures in the injected graph; proc id == terminal id).
+    expect(
+        page.locator('[data-proc-head][data-proc-id="tst"] [data-proc-name]')
+    ).to_have_value("High pass rate")
+    expect(
+        page.locator('[data-proc-head][data-proc-id="tes1"] [data-proc-name]')
+    ).to_have_value("Zero tolerance")
+    # Confirm tes1's input wiring survived the save.
     tes1 = page.locator('[data-node="tes1"]')
-    expect(tes1.locator("[data-proc-title]")).to_have_value("Zero tolerance")
     expect(tes1.locator("[data-input]")).to_have_value("src")
-
-    # Confirm tst's proc-title + threshold were persisted.
-    tst = page.locator('[data-node="tst"]')
-    expect(tst.locator("[data-proc-title]")).to_have_value("High pass rate")
-    expect(tst.locator("[data-threshold-count]")).to_have_value("5")
 
     # ── 7. Run the control ──────────────────────────────────────────────────
     page.goto(base + "/")
