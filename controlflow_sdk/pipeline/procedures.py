@@ -34,19 +34,18 @@ def effective_procedures(pipeline: Pipeline) -> list[ProcedureDef]:
       appended auto procedure for every terminal whose ``procedure_id`` is unset or
       dangling (graceful degradation — never drop a test).
     - When none are defined: one auto procedure per terminal (today's behavior),
-      coded ``P1..Pn`` in terminal order.
+      coded ``P1..Pn`` in terminal order.  A SOLE auto procedure gets ``code=""``
+      for byte-identity with the bundle's single-procedure path (which always
+      hardcodes ``code=""``).
     """
     terminals = pipeline.terminals
     defined = sorted(pipeline.procedures, key=lambda p: p.position)
     defined_ids = {p.id for p in defined}
 
-    assigned: dict[str, str] = {}
     orphans: list[Node] = []
     for t in terminals:
         pid = _assigned_procedure_id(t)
-        if pid and pid in defined_ids:
-            assigned[t.id] = pid
-        else:
+        if not (pid and pid in defined_ids):
             orphans.append(t)
 
     out: list[ProcedureDef] = []
@@ -56,15 +55,18 @@ def effective_procedures(pipeline: Pipeline) -> list[ProcedureDef]:
     else:
         start = 0
 
+    # A lone auto procedure (no defined procedures, single terminal) gets code=""
+    # so the local workpaper heading matches the bundle's single-procedure shape.
+    lone_auto = not defined and len(orphans) == 1
     for i, t in enumerate(orphans):
-        out.append(_auto_procedure(t, start + i))
+        out.append(_auto_procedure(t, start + i, lone=lone_auto))
     return out
 
 
-def _auto_procedure(terminal: Node, position: int) -> ProcedureDef:
+def _auto_procedure(terminal: Node, position: int, *, lone: bool = False) -> ProcedureDef:
     return ProcedureDef(
         id=terminal.id,
-        code=f"P{position + 1}",
+        code="" if lone else f"P{position + 1}",
         name=terminal.config.get("title") or terminal.title or f"Test {terminal.id}",
         assertion="",
         narrative=terminal.narrative,

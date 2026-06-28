@@ -69,6 +69,32 @@ def test_no_procedures_defined_derives_one_per_terminal():
     assert {t.id for t in tests_for_procedure(p, eff[0].id)} == {"t1"}
 
 
+def test_sole_auto_procedure_gets_empty_code():
+    """Single-terminal pipeline with no defined procedures → code='' (bundle byte-identity)."""
+    raw = {
+        "nodes": [
+            {"id": "imp", "type": "import", "source_id": "s"},
+            {"id": "t1", "type": "test", "inputs": ["imp"],
+             "config": {"logic": "all", "item_key_column": "id", "conditions": []}},
+        ],
+    }
+    p = parse_pipeline(raw)
+    eff = effective_procedures(p)
+    assert len(eff) == 1
+    assert eff[0].code == ""          # lone auto → empty code (matches bundle single-proc shape)
+
+
+def test_two_auto_procedures_keep_positional_codes():
+    """Two-terminal no-procedures pipeline → codes stay P1, P2 (not collapsed to '')."""
+    raw = _two_proc_pipeline()
+    raw.pop("procedures")
+    for n in raw["nodes"]:
+        n.get("config", {}).pop("procedure_id", None)
+    p = parse_pipeline(raw)
+    eff = effective_procedures(p)
+    assert [pr.code for pr in eff] == ["P1", "P2"]  # ≥2 autos keep positional codes
+
+
 def test_unassigned_test_falls_back_to_auto_procedure():
     raw = _two_proc_pipeline()
     # Drop t2's procedure_id but keep p1/p2 defined → t2 is unassigned.

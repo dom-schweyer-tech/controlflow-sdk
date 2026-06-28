@@ -135,3 +135,39 @@ def test_code_assertion_empty_no_extra_html_lines():
     )
     html = render_html(wp)
     assert 'class="assert"' not in html
+
+
+def test_lone_auto_code_empty_heading_is_legacy_form():
+    """Single-procedure workpaper with code='' renders the legacy 'P1: title' heading.
+
+    Pins the byte-identity guarantee: a lone auto-derived procedure (code='') must
+    produce 'P1: title' in both HTML and Markdown — NOT the 'P1 · title' middot form
+    that a non-empty code would generate.
+    """
+    from controlflow_sdk.render.html import render_html
+    from controlflow_sdk.render.markdown import render_markdown
+
+    run = RunRecord(
+        control_id="c1", executed_at="t", population_size=10, violations=[]
+    )
+    proc = Procedure(
+        code="",          # lone auto procedure — code always empty
+        title="Cash Cutoff",
+        assertion="",
+        narrative="n",
+        test_code="...",
+        result=run,
+    )
+    wp = Workpaper(
+        control_id="c1", title="T", objective="o", narrative="n",
+        framework_refs={}, procedures=[proc], generated_at="t",
+    )
+
+    # HTML: legacy "P1: title" heading, not the "P1 &middot; title" code-prefix form.
+    html = render_html(wp)
+    assert "P1: Cash Cutoff" in html
+    assert "P1 &middot; Cash Cutoff" not in html
+
+    # Markdown: same "P1: title" heading form.
+    md = render_markdown(wp)
+    assert "### P1: Cash Cutoff" in md

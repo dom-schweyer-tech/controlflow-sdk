@@ -256,21 +256,16 @@ def _render_procedures(lines: list[str], wp: Workpaper) -> None:
             if has_checks:
                 lines.append("| Item Key | Severity | Description | Failed checks |")
                 lines.append("| --- | --- | --- | --- |")
-                for v in run.violations:
-                    key = _md_cell(v.item_key)
-                    sev = _md_cell(v.severity)
-                    desc = _md_cell(v.description)
-                    checks_raw = v.details.get("checks") or []
-                    checks = _md_cell(", ".join(checks_raw))
-                    lines.append(f"| {key} | {sev} | {desc} | {checks} |")
             else:
                 lines.append("| Item Key | Severity | Description |")
                 lines.append("| --- | --- | --- |")
-                for v in run.violations:
-                    key = _md_cell(v.item_key)
-                    sev = _md_cell(v.severity)
-                    desc = _md_cell(v.description)
-                    lines.append(f"| {key} | {sev} | {desc} |")
+            for v in run.violations:
+                key = _md_cell(v.item_key)
+                sev = _md_cell(v.severity)
+                desc = _md_cell(v.description)
+                checks_raw: list[str] = v.details.get("checks") or []
+                checks_cell = f" | {_md_cell(', '.join(checks_raw))}" if has_checks else ""
+                lines.append(f"| {key} | {sev} | {desc}{checks_cell} |")
             lines.append("")
 
 
