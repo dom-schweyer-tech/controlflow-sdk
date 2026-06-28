@@ -23,6 +23,7 @@
   .pipe-kind.k-custom_python { background: var(--bg-surface-3); color: var(--text-secondary); }
   .pipe-kind.k-test { background: var(--status-success-muted); color: var(--status-success); }
   .pipe-id { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); }
+  .pipe-id-sub { font-size: 11px; color: var(--text-tertiary); opacity: 0.7; }
   .pipe-count {
     margin-left: auto; font-family: var(--font-mono); font-size: 12px;
     color: var(--text-secondary); white-space: nowrap;
@@ -182,7 +183,9 @@
       document.querySelectorAll('[data-node]').forEach(function (card) {
         var id = card.getAttribute('data-node');
         var type = card.getAttribute('data-type');
-        var node = { id: id, type: type, narrative: '', config: {}, inputs: [] };
+        var node = { id: id, type: type, title: '', narrative: '', config: {}, inputs: [] };
+        var titleEl = card.querySelector('[data-node-title]');
+        if (titleEl) { node.title = titleEl.value; }
         var narr = card.querySelector('[data-narrative]');
         if (narr) { node.narrative = narr.value; }
         if (type === 'import') {
@@ -329,7 +332,7 @@
     }
 
     function newNode(type) {
-      var node = { id: genId(type), type: type, narrative: '', config: {}, inputs: [] };
+      var node = { id: genId(type), type: type, title: '', narrative: '', config: {}, inputs: [] };
       if (type === 'import') { node.source_id = null; }
       if (type === 'custom_python') { node.config.flavor = 'transform'; node.config.code = 'rows = rows'; }
       if (type === 'filter' || type === 'test') { node.config.logic = 'all'; node.config.conditions = []; }
