@@ -508,18 +508,11 @@ clean):
 </div>
 {% endmacro %}
 
-{# A band's node cards with an insert zone above each card (on that card's incoming
-   edge, so a splice is always clean) and one append zone at the end. `proc` is the
-   owning procedure id ('' for the Inputs band). #}
-{% macro band_cards(band_nodes, proc) %}
-  {% for node in band_nodes %}
-    {{ insert_zone(node.inputs[0] if node.inputs else '', node.id, proc,
-                   'start' if loop.first else 'mid') }}
-    {% set band_shared = (proc == '') %}
-    {% include "partials/_pipe_node.html" %}
-  {% endfor %}
-  {% if band_nodes %}{{ insert_zone((band_nodes | last).id, '', proc, 'end') }}{% endif %}
-{% endmacro %}
+{# IMPORTANT: keep `{% include "partials/_pipe_node.html" %}` at the template's
+   top level inside the `for` loops (NOT inside a macro). The partial reads the
+   loop's `node`, the per-loop `band_shared` flag, AND the GLOBAL `nodes` context
+   var (for its input-step dropdown). A macro would not reliably expose the loop
+   variable to the include — this mirrors the pre-existing working pattern. #}
 
 {% if not bands.shared.nodes and not bands.procedures %}
 <p class="muted">No steps yet — insert your first step below (start with an
@@ -533,7 +526,13 @@ clean):
     <span class="band-sub muted">data sources and steps feeding more than one procedure</span>
   </summary>
   <div class="band-body">
-    {{ band_cards(bands.shared.nodes, '') }}
+    {% for node in bands.shared.nodes %}
+      {{ insert_zone(node.inputs[0] if node.inputs else '', node.id, '',
+                     'start' if loop.first else 'mid') }}
+      {% set band_shared = true %}
+      {% include "partials/_pipe_node.html" %}
+    {% endfor %}
+    {% if bands.shared.nodes %}{{ insert_zone((bands.shared.nodes | last).id, '', '', 'end') }}{% endif %}
   </div>
 </details>
 
@@ -555,7 +554,14 @@ clean):
     <p class="muted proc-empty">No test yet — insert a <strong>Test</strong> below to give this
       procedure a result.</p>
     {% endif %}
-    {{ band_cards(band.nodes, band.proc.id) }}
+    {% for node in band.nodes %}
+      {{ insert_zone(node.inputs[0] if node.inputs else '', node.id, band.proc.id,
+                     'start' if loop.first else 'mid') }}
+      {% set band_shared = false %}
+      {% include "partials/_pipe_node.html" %}
+    {% endfor %}
+    {% if band.nodes %}{{ insert_zone((band.nodes | last).id, '', band.proc.id, 'end') }}
+    {% else %}{{ insert_zone('', '', band.proc.id, 'empty') }}{% endif %}
   </div>
 </details>
 {% endfor %}
@@ -563,6 +569,9 @@ clean):
 <button type="button" class="btn btn-sm btn-add" id="proc-add">＋ Add procedure</button>
 {% endif %}
 ```
+
+The empty-procedure-section insert zone passes `data-up=""`; `insertStep` (Step 4b) defaults the Test's
+upstream to the last shared node so the new terminal is always wired (no unwired-terminal parse error).
 
 - [ ] **Step 2: Delete the old panel partial and its include**
 
@@ -651,9 +660,17 @@ In the `<script>` block:
     function insertStep(upId, downId, type, procId) {
       serialize();
       var node = newNode(type);
+      if (type === 'test' && procId) { node.config.procedure_id = procId; }
+      // An empty procedure section's insert zone has no upstream card (data-up="").
+      // Default any non-import step's upstream to the LAST shared (Inputs-band) node
+      // so a Test added into an empty section is a VALID wired terminal — an unwired
+      // terminal fails parse_pipeline and the save 500s/422s (e2e-documented).
+      if (!upId && type !== 'import') {
+        var shared = document.querySelectorAll('[data-band-key="__inputs__"] [data-node]');
+        if (shared.length) { upId = shared[shared.length - 1].getAttribute('data-node'); }
+      }
       var splice = (type !== 'import');
       if (splice && upId) { node.inputs = [upId]; }
-      if (type === 'test' && procId) { node.config.procedure_id = procId; }
       graph.nodes.push(node);
       if (splice && upId && downId) {
         graph.nodes.forEach(function (n) {
