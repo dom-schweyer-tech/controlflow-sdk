@@ -125,6 +125,127 @@ def test_diagram_collapsed_band_emits_summary_box():
     assert any(box["id"] == "t1" for box in d["boxes"])
 
 
+def test_procedure_context_includes_narrative():
+    pipe = parse_pipeline({
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "s"},
+            {"id": "t1", "type": "test", "inputs": ["src"],
+             "config": {"procedure_id": "p1", "conditions": [{"column": "a", "op": "not_empty"}]}},
+        ],
+        "procedures": [
+            {"id": "p1", "code": "P1", "name": "One",
+             "narrative": "Why we test this", "position": 0},
+        ],
+    })
+    ctx = _procedure_context(pipe)
+    assert ctx["procedures"][0]["narrative"] == "Why we test this"
+
+
+def test_card_bands_proc_carries_narrative():
+    pipe = parse_pipeline({
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "s"},
+            {"id": "t1", "type": "test", "inputs": ["src"],
+             "config": {"procedure_id": "p1", "conditions": [{"column": "a", "op": "not_empty"}]}},
+        ],
+        "procedures": [
+            {"id": "p1", "code": "P1", "name": "One",
+             "narrative": "Why we test this", "position": 0},
+        ],
+    })
+    bands = _card_bands(pipe, _vms(pipe), _procedure_context(pipe))
+    assert bands["procedures"][0]["proc"]["narrative"] == "Why we test this"
+
+
+def test_procedure_context_sole_procedure_code_empty():
+    """A single auto-derived procedure shows an EMPTY code so the workpaper heading
+    stays the legacy 'P1: title' form (learning 0036) — not 'P1'."""
+    pipe = parse_pipeline({
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "s"},
+            {"id": "t1", "type": "test", "inputs": ["src"],
+             "config": {"conditions": [{"column": "a", "op": "not_empty"}]}},
+        ],
+    })
+    ctx = _procedure_context(pipe)
+    assert len(ctx["procedures"]) == 1
+    assert ctx["procedures"][0]["code"] == ""
+
+
+def test_procedure_context_multi_procedure_codes_numbered():
+    """With 2+ procedures, auto codes are P1..Pn by position."""
+    pipe = parse_pipeline({
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "s"},
+            {"id": "t1", "type": "test", "inputs": ["src"],
+             "config": {"conditions": [{"column": "a", "op": "not_empty"}]}},
+            {"id": "t2", "type": "test", "inputs": ["src"],
+             "config": {"conditions": [{"column": "a", "op": "not_empty"}]}},
+        ],
+    })
+    ctx = _procedure_context(pipe)
+    assert [p["code"] for p in ctx["procedures"]] == ["P1", "P2"]
+
+
+def test_builder_get_renders_procedure_narrative_field(client):
+    """The procedure section header exposes an editable narrative field, pre-filled
+    from the procedure's narrative."""
+    csv = b"user_id,can_create\nU1,true\nU2,\n"
+    client.post("/sources", data={"source_id": "users", "format": "csv"},
+                files={"file": ("users.csv", io.BytesIO(csv), "text/csv")},
+                follow_redirects=False)
+    client.post("/controls", data={"id": "c1", "title": "C1", "objective": "o",
+                "narrative": "n", "source_ids": ["users"], "failure_threshold_count": "0"},
+                follow_redirects=False)
+    graph = {
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "users"},
+            {"id": "tst", "type": "test", "inputs": ["src"],
+             "config": {"logic": "all", "procedure_id": "p1",
+                        "conditions": [{"column": "can_create", "op": "not_empty"}]}},
+        ],
+        "procedures": [{"id": "p1", "code": "P1", "name": "One",
+                        "narrative": "Reviewer independence", "position": 0}],
+    }
+    client.post("/controls/c1/logic/builder",
+                data={"pipeline_json": json.dumps(graph)}, follow_redirects=False)
+    page = client.get("/controls/c1/logic/builder").text
+    assert "data-proc-narrative" in page
+    assert "Reviewer independence" in page
+
+
+def test_test_node_card_has_no_procedure_identity_fields(client):
+    """The Test node card carries step mechanics only — the 'Procedure title' and
+    per-node Threshold fields moved to the procedure header. The 'Belongs to'
+    selector and Severity stay."""
+    csv = b"user_id,can_create\nU1,true\nU2,\n"
+    client.post("/sources", data={"source_id": "users", "format": "csv"},
+                files={"file": ("users.csv", io.BytesIO(csv), "text/csv")},
+                follow_redirects=False)
+    client.post("/controls", data={"id": "c1", "title": "C1", "objective": "o",
+                "narrative": "n", "source_ids": ["users"], "failure_threshold_count": "0"},
+                follow_redirects=False)
+    graph = {
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "users"},
+            {"id": "tst", "type": "test", "inputs": ["src"],
+             "config": {"logic": "all", "procedure_id": "p1",
+                        "conditions": [{"column": "can_create", "op": "not_empty"}]}},
+        ],
+        "procedures": [{"id": "p1", "code": "P1", "name": "One", "position": 0}],
+    }
+    client.post("/controls/c1/logic/builder",
+                data={"pipeline_json": json.dumps(graph)}, follow_redirects=False)
+    page = client.get("/controls/c1/logic/builder").text
+    # Vestigial procedure fields are gone from every Test node card and the serializer.
+    assert "data-proc-title" not in page
+    assert "data-threshold-pct" not in page
+    assert "data-threshold-count" not in page
+    # Genuine step mechanics remain.
+    assert "data-procedure" in page   # "Belongs to" selector
+    assert "data-severity" in page
+
+
 def test_builder_get_degrades_gracefully_on_partial_pipeline(
     client: TestClient, engagement: Path
 ) -> None:

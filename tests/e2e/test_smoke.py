@@ -181,6 +181,14 @@ def test_author_run_export_smoke(page: Page, live_server: str, tmp_path: Path) -
     new_section.locator("[data-proc-code]").fill("P1")
     new_section.locator("[data-proc-name]").fill("Manual JE Review")
     new_section.locator("[data-proc-assert]").fill("Segregation of Duties")
+    # The procedure header owns the narrative (Unit 1); the Test node has no
+    # procedure-identity fields (Unit 2).
+    new_section.locator("[data-proc-narrative]").fill(
+        "Reviewer must be independent of the preparer."
+    )
+    expect(page.locator('[data-node="tst"] [data-proc-title]')).to_have_count(0)
+    expect(page.locator('[data-node="tst"] [data-threshold-pct]')).to_have_count(0)
+    expect(page.locator('[data-node="tst"] [data-threshold-count]')).to_have_count(0)
     page.locator('[data-node="tst"] [data-procedure]').select_option(pid)
     page.wait_for_load_state("networkidle")  # change → autosave re-groups the card
 
@@ -200,6 +208,9 @@ def test_author_run_export_smoke(page: Page, live_server: str, tmp_path: Path) -
         page.locator(f'[data-proc-head][data-proc-id="{pid}"] [data-proc-name]')
     ).to_have_value("Manual JE Review")
     expect(page.locator('[data-node="tst"] [data-procedure]')).to_have_value(pid)
+    expect(
+        page.locator(f'[data-proc-head][data-proc-id="{pid}"] [data-proc-narrative]')
+    ).to_have_value("Reviewer must be independent of the preparer.")
 
     # 4. Run it. The run button lives on the dashboard as a row-scoped
     #    <form action="/controls/sod/run"> with a "Run" submit button.

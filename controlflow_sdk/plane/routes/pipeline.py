@@ -698,9 +698,10 @@ def _procedure_context(pipeline: Pipeline | None) -> dict[str, Any]:
         procedures = [
             {
                 "id": p.id,
-                "code": p.code or f"P{i + 1}",
+                "code": p.code or (f"P{i + 1}" if len(eff) > 1 else ""),
                 "name": p.name,
                 "assertion": p.assertion,
+                "narrative": p.narrative,
                 "failure_threshold_pct": p.failure_threshold_pct,
                 "failure_threshold_count": p.failure_threshold_count,
                 "color": color_by_pid[p.id],
@@ -751,7 +752,7 @@ def _card_bands(
         grouped = group_nodes_by_band(cards_pipeline)
         proc_by_id = {p["id"]: p for p in proc_ctx.get("procedures", [])}
         _proc_defaults: dict[str, Any] = {
-            "code": "", "name": "", "assertion": "",
+            "code": "", "name": "", "assertion": "", "narrative": "",
             "failure_threshold_pct": None, "failure_threshold_count": None, "color": "#888",
         }
         procedures = [
