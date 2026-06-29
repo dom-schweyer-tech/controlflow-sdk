@@ -22,6 +22,7 @@ never learns the word "node" (cardinal rule, learning 0001).
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Callable, Generator
 from typing import Any
@@ -30,6 +31,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from uticen_lite.model.population import Population
 from uticen_lite.pipeline.compile import compile_pipeline
 from uticen_lite.pipeline.materialize import new_step_cache as _new_step_cache
 from uticen_lite.pipeline.model import Pipeline, PipelineError, parse_pipeline
@@ -80,6 +82,7 @@ def _now_iso() -> str:
 # Process-wide, LRU-bounded cache of materialised step frames (single-user, localhost).
 # Keyed inside materialize_steps by each node's ancestor-closure + source versions.
 _STEP_CACHE = _new_step_cache()
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -449,19 +452,20 @@ def _node_label(node: Any) -> str:
 # Full-population frames → source versions → materialised steps → row-counts
 # ---------------------------------------------------------------------------
 
-def _load_full_frames(
+def _load_source_populations(
     conn: sqlite3.Connection, root: Any, source_ids: list[str]
-) -> dict[str, Any]:
-    """Load the FULL coerced DataFrame for each bound source (by source_id).
+) -> dict[str, Population]:
+    """Load the full :class:`Population` for each bound source (by source_id).
 
-    Decision (ii): the live badges and the inspector run over the full population —
-    the incremental step cache keeps edits fast. Returns only the sources whose file
-    exists; a missing frame makes materialize_steps return ``{}``.
+    Like :func:`_load_full_frames` but keeps the Population (its ``.df`` AND key
+    columns), which the record trace needs to resolve the key column and to
+    evaluate ``exists_in`` conditions. Returns only sources whose file exists; a
+    broken/adapters-missing file is skipped.
     """
     from uticen_lite.adapters.files import source_for
     from uticen_lite.store.loader import _binding
 
-    frames: dict[str, Any] = {}
+    out: dict[str, Population] = {}
     for sid in source_ids:
         src = repo.get_source(conn, sid)
         current = repo.get_current_file(conn, sid)
@@ -471,10 +475,37 @@ def _load_full_frames(
         if not fpath.is_file():
             continue
         try:
-            frames[sid] = source_for(_binding(src), root).load().df
-        except Exception:  # noqa: BLE001 — a broken/adapters-missing file yields no frame
+            # Reconcile key_config from the is_key column flags when not already set.
+            # The web app keeps both in sync; but when only repo.set_columns was called
+            # (e.g. in direct-DB test helpers), key_config["columns"] may be absent.
+            if not src.get("key_config", {}).get("columns"):
+                key_cols = [
+                    c["original_name"] for c in src.get("columns", []) if c.get("is_key")
+                ]
+                if key_cols:
+                    src = dict(src)
+                    src["key_config"] = {
+                        "mode": "single" if len(key_cols) == 1 else "composite",
+                        "columns": key_cols,
+                    }
+            out[sid] = source_for(_binding(src), root).load()
+        except Exception:  # noqa: BLE001 — a broken/adapters-missing file yields no population
             continue
-    return frames
+    return out
+
+
+def _load_full_frames(
+    conn: sqlite3.Connection, root: Any, source_ids: list[str]
+) -> dict[str, Any]:
+    """Load the FULL coerced DataFrame for each bound source (by source_id).
+
+    Thin wrapper over :func:`_load_source_populations` (keeps the live badges /
+    inspector unchanged) — the trace needs the Population, the badges only the df.
+    """
+    return {
+        sid: pop.df
+        for sid, pop in _load_source_populations(conn, root, source_ids).items()
+    }
 
 
 def _source_versions(
@@ -1132,6 +1163,73 @@ def register(
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(request, "partials/_pipe_diagram_card.html", ctx)
         return templates.TemplateResponse(request, "logic_flowchart.html", ctx)
+
+    @app.get("/controls/{control_id}/logic/trace", response_class=HTMLResponse)
+    def logic_trace(
+        control_id: str,
+        request: Request,
+        key: str = "",
+        conn: sqlite3.Connection = Depends(get_conn),
+    ) -> HTMLResponse:
+        from uticen_lite.pipeline.trace import trace_record
+
+        root = request.app.state.project_root
+        control = repo.get_control(conn, control_id)
+        ctx: dict[str, Any] = {
+            "project": repo.get_project(conn) or {"name": ""},
+            "control": control,
+            "control_id": control_id,
+            "active": "logic",
+            "logic_tab": "trace",
+            "key": key,
+            "examples": [],
+            "trace": None,
+            "message": "",
+        }
+        # The Trace tab must never 500: any failure degrades to a friendly page
+        # (learnings 0013/0033).
+        try:
+            if control is None:
+                ctx["message"] = "Control not found."
+                return templates.TemplateResponse(request, "logic_trace.html", ctx)
+            if is_raw_python(control):
+                ctx["message"] = (
+                    "Tracing needs the rule builder — this control is authored in Python."
+                )
+                return templates.TemplateResponse(request, "logic_trace.html", ctx)
+            pipeline = _pipeline_for_view(control)
+            if pipeline is None:
+                ctx["message"] = (
+                    "This control isn't ready to trace yet — add logic in the Builder first."
+                )
+                return templates.TemplateResponse(request, "logic_trace.html", ctx)
+            sources = _load_source_populations(conn, root, pipeline.import_source_ids())
+            import_ids = pipeline.import_source_ids()
+            primary = sources.get(import_ids[0]) if import_ids else None
+            if primary is not None and primary.key_columns:
+                kc = primary.key_columns[0]
+                ctx["examples"] = (
+                    primary.df[kc].astype(str).drop_duplicates().head(5).tolist()
+                )
+            if not sources:
+                ctx["message"] = "Bind a data source to trace a record."
+                return templates.TemplateResponse(request, "logic_trace.html", ctx)
+            if key:
+                # Seed frames with raw import-node DataFrames so trace_record can always
+                # locate the record by key, even when _materialize_full fails (e.g. a
+                # type-mismatch condition degrades to per-condition detail from the trace).
+                frames: dict[str, Any] = {
+                    node.id: sources[node.source_id].df
+                    for node in pipeline.topological()
+                    if node.type == "import" and node.source_id in sources
+                }
+                frames.update(_materialize_full(conn, root, pipeline))
+                ctx["trace"] = trace_record(pipeline, frames, key, sources)
+        except Exception:  # noqa: BLE001 — the Trace tab must never 500
+            logger.exception("Unexpected error tracing record in control %r", control_id)
+            ctx["trace"] = None
+            ctx["message"] = "This control can't be traced right now."
+        return templates.TemplateResponse(request, "logic_trace.html", ctx)
 
     @app.get("/controls/{control_id}/logic/python", response_class=HTMLResponse)
     def logic_python(

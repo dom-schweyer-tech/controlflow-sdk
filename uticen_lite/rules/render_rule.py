@@ -69,13 +69,40 @@ def _mask_expr(cond: Condition, frame: str = "df") -> str:
         return f"({col} == {val!r})"
     if op == "ne":
         return f"({col} != {val!r})"
+    # For numeric comparison operators where the *value* is a number (int/float),
+    # coerce the column to numeric so that "amount" gt 100 works even when the
+    # column's data_type is "text".  When val is a string (e.g. a date like
+    # "2025-12-31"), leave the comparison unchanged — pandas already converts date
+    # strings to Timestamps for datetime columns, so coercion is wrong there.
+    # NOTE: the runner evaluates via evaluate_rule → _condition_mask (a separate
+    # path) where type mismatches intentionally raise so authors get clear feedback.
+    _val_is_num = isinstance(val, (int, float)) and not isinstance(val, bool)
     if op == "gt":
+        if _val_is_num:
+            return (
+                f"(__import__('pandas').to_numeric({col}, errors='coerce') > {val!r}).fillna(False)"
+            )
         return f"({col} > {val!r})"
     if op == "ge":
+        if _val_is_num:
+            return (
+                f"(__import__('pandas').to_numeric({col}, errors='coerce')"
+                f" >= {val!r}).fillna(False)"
+            )
         return f"({col} >= {val!r})"
     if op == "lt":
+        if _val_is_num:
+            return (
+                f"(__import__('pandas').to_numeric({col}, errors='coerce')"
+                f" < {val!r}).fillna(False)"
+            )
         return f"({col} < {val!r})"
     if op == "le":
+        if _val_is_num:
+            return (
+                f"(__import__('pandas').to_numeric({col}, errors='coerce')"
+                f" <= {val!r}).fillna(False)"
+            )
         return f"({col} <= {val!r})"
     if op == "is_empty":
         return f"({col}.isna() | ({col}.astype(str) == ''))"
