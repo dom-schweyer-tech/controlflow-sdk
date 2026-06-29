@@ -475,19 +475,6 @@ def _load_source_populations(
         if not fpath.is_file():
             continue
         try:
-            # Reconcile key_config from the is_key column flags when not already set.
-            # The web app keeps both in sync; but when only repo.set_columns was called
-            # (e.g. in direct-DB test helpers), key_config["columns"] may be absent.
-            if not src.get("key_config", {}).get("columns"):
-                key_cols = [
-                    c["original_name"] for c in src.get("columns", []) if c.get("is_key")
-                ]
-                if key_cols:
-                    src = dict(src)
-                    src["key_config"] = {
-                        "mode": "single" if len(key_cols) == 1 else "composite",
-                        "columns": key_cols,
-                    }
             out[sid] = source_for(_binding(src), root).load()
         except Exception:  # noqa: BLE001 — a broken/adapters-missing file yields no population
             continue

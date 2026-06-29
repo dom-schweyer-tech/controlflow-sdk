@@ -21,14 +21,21 @@ def _conn(client):
     return connect(client.app.state.project_root)
 
 
-def _set_key(client, sid, key_col) -> None:
+def _configure_source(
+    client, sid="invoices", key="invoice_id", number_cols=("amount",)
+) -> None:
+    """Configure a source via the real save route, setting key_config and dtypes."""
+    data: dict[str, str] = {"key_columns": key}
     conn = _conn(client)
     try:
-        src = repo.get_source(conn, sid)
-        cols = [{**c, "is_key": (c["original_name"] == key_col)} for c in src["columns"]]
-        repo.set_columns(conn, sid, cols)
+        cols = repo.get_source(conn, sid)["columns"]
     finally:
         conn.close()
+    for c in cols:
+        name = c["original_name"]
+        data[f"include__{name}"] = "on"
+        data[f"data_type__{name}"] = "number" if name in number_cols else "text"
+    client.post(f"/sources/{sid}", data=data, follow_redirects=False)
 
 
 def _make_control(client, cid="C1") -> None:
@@ -51,7 +58,7 @@ _INVOICES = (
 
 def _seeded(client, conditions=None):
     _make_source(client, "invoices", _INVOICES)
-    _set_key(client, "invoices", "invoice_id")
+    _configure_source(client)
     cid = "TR1"
     _make_control(client, cid)
     graph = {"nodes": [
@@ -104,7 +111,7 @@ def test_missing_key_renders_not_found(client):
 
 def test_python_control_degrades(client):
     _make_source(client, "invoices", _INVOICES)
-    _set_key(client, "invoices", "invoice_id")
+    _configure_source(client)
     cid = "PYC"
     _make_control(client, cid)
     c = client
