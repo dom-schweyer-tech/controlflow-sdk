@@ -41,7 +41,18 @@ trying to click) revealed it.
   stays bounded (and the control is clickable) — unit/`TestClient` tests cannot catch a client-side
   htmx loop. Run-the-real-thing kin of [[0040]]/[[0012]].
 
+## Corollary (2026-06-29) — an `outerHTML` swap of an EMPTY body deletes its own target
+
+The OFF path doesn't merely "self-terminate" — `swap:"outerHTML"` of an empty string **removes the
+`#header-update-indicator` placeholder element entirely**, after which the `setInterval` poll's
+`querySelector` returns null and the indicator can't reappear until a full page reload. So a base-layout
+slot filled by an `outerHTML` swap silently vanishes whenever the route returns empty. Two takeaways:
+return a stable non-empty wrapper (swap `innerHTML`, or render a neutral placeholder) if the slot must
+survive an "empty" state; and recognise this as *why the indicator looked "lost"* once the toggle was
+OFF. PR #110 sidesteps it for the common case by defaulting the update check **ON** (the route returns
+the indicator markup, so the slot stays populated out of the box — see [[0017]]).
+
 ## Reference
 
 - `uticen_lite/plane/templates/base.html` (the removed `htmx:load` listener; one-time
-  `setTimeout` load + 120s `setInterval` check retained).
+  `setTimeout` load + 120s `setInterval` check retained; `outerHTML` swap of `#header-update-indicator`).

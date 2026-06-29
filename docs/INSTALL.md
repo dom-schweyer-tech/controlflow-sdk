@@ -139,9 +139,9 @@ ls /tmp/cfsdk-venv/bin/uticen-lite /tmp/cfsdk-venv/bin/controlplane  # console s
 
 The control plane is **install-aware** — it upgrades itself the right way for how you installed it.
 
-**From the app.** Open **Settings ▸ Updates**. Turn on *"Check for updates when the app starts"*
-(off by default — leaving it off keeps the zero-egress default) to get a banner when a newer version
-is available, or click **Check for updates** any time. Click **Update now** to upgrade: the app runs
+**From the app.** Open **Settings ▸ Updates**. *"Check for updates when the app starts"* is **on by
+default** — it shows the header update indicator and a banner when a newer version is available; turn
+it **off** for zero network egress. You can also click **Check for updates** any time. Click **Update now** to upgrade: the app runs
 the upgrade in a detached helper and shuts down — re-run `controlplane` when it finishes (progress is
 logged to `.controlplane-upgrade.log` in the engagement folder).
 
@@ -168,7 +168,7 @@ controlplane --project my-audit
 # → opens http://127.0.0.1:8765
 ```
 
-The control plane is **localhost-only with zero network egress by default** — it listens on
-`127.0.0.1:8765` and makes no outbound connections except an **opt-in** update check (off by default;
-see [Upgrading](#upgrading)), so client data never leaves the machine (see the
-[README](../README.md#design-principles)).
+The control plane is **localhost-only** — it listens on `127.0.0.1:8765`. Its one outbound
+connection is a launch update check (**on by default**; see [Upgrading](#upgrading)) that fetches only
+the latest version number — never client data. Turn the check off in **Settings ▸ Updates** for zero
+network egress (see the [README](../README.md#design-principles)).

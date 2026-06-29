@@ -69,7 +69,7 @@ def get_check_updates_on_launch(conn: sqlite3.Connection) -> bool:
 
 
 def set_check_updates_on_launch(conn: sqlite3.Connection, value: bool) -> None:
-    """Persist the opt-in update-check toggle, preserving the rest of the project record."""
+    """Persist the update-check toggle, preserving the rest of the project record."""
     project = get_project(conn) or {}
     system = dict(project.get("system") or {})
     system["check_updates_on_launch"] = bool(value)
