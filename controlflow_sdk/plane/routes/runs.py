@@ -9,6 +9,8 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from controlflow_sdk.model.control import Threshold
+from controlflow_sdk.model.workpaper import Determination
 from controlflow_sdk.project.loader import ProjectError
 from controlflow_sdk.runner.execute import RunnerError
 from controlflow_sdk.store import repo
@@ -79,6 +81,16 @@ def register(
             workpaper_html = (
                 wp_path.read_text(encoding="utf-8") if wp_path.exists() else ""
             )
+            # Derive the verdict from the SAME threshold the embedded workpaper uses,
+            # never from `failed == 0` — otherwise a run within tolerance is branded a
+            # deficiency here while the workpaper calls it effective (audit finding A1).
+            control = repo.get_control(conn, control_id)
+            threshold = Threshold(
+                failure_threshold_pct=(control or {}).get("failure_threshold_pct"),
+                failure_threshold_count=(control or {}).get("failure_threshold_count"),
+            )
+            determination = Determination(threshold, run["failed"], run["total"])
+            threshold_text, _ = determination.conclusion_text()
             return templates.TemplateResponse(
                 request,
                 "run_view.html",
@@ -86,6 +98,9 @@ def register(
                     "project": repo.get_project(conn) or {"name": ""},
                     "control_id": control_id,
                     "run": run,
+                    "passed": determination.passed,
+                    "verdict": determination.verdict,
+                    "threshold_text": threshold_text,
                     "workpaper_html": workpaper_html,
                 },
             )

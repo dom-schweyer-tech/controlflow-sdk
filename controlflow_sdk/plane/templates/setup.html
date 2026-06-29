@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Set up your engagement — Control Plane{% endblock %}
+{% block title %}Set up your engagement — Uticen Lite{% endblock %}
 {% block body %}
 <div class="setup-page">
 <div class="page-head setup-head">
-  <h1>Welcome to the Control Plane</h1>
+  <h1>Welcome to Uticen Lite</h1>
   <p class="lead">
     An engagement is a single control-testing workspace. Name yours to get started, or
     load the Northwind demo to explore a fully populated example you can run right away.
@@ -36,7 +36,7 @@
           </datalist>
         </div>
         <div class="setup-actions">
-          <button type="submit">Create engagement</button>
+          <button class="btn btn-primary" type="submit">Create engagement</button>
         </div>
       </form>
     </div>
@@ -50,12 +50,12 @@
         in seconds, no setup required.
       </p>
       <ul class="setup-points">
-        <li>8 real audit controls — financial close, IT access, procurement</li>
-        <li>8 seeded data extracts, ready to test against</li>
+        <li>9 real audit controls — financial close, IT access, procurement, data-center monitoring</li>
+        <li>9 seeded data sources, ready to test against</li>
         <li>Run full-population and view an audit-grade workpaper right away</li>
       </ul>
       <form class="setup-actions" method="post" action="/setup/demo">
-        <button type="submit">Load the Northwind demo</button>
+        <button class="btn btn-primary" type="submit">Load the Northwind demo</button>
       </form>
     </div>
   </section>

@@ -40,7 +40,7 @@
                 aria-label="Toggle light and dark theme" title="Toggle light/dark">
           <span class="theme-icon-dark">☾</span><span class="theme-icon-light">☀</span>
         </button>
-        {% if project and project.name %}<span class="chip">{{ project.name }}</span>{% endif %}
+        {% if project and project.name %}<span class="chip chip-name">{{ project.name }}</span>{% endif %}
       </div>
     </div>
   </header>
@@ -173,9 +173,12 @@
       if (!indicator || !window.htmx) return;
       window.htmx.ajax(method, path, {target: indicator, swap: "outerHTML"});
     }
-    document.addEventListener("htmx:load", function() {
-      refreshHeaderIndicator("GET", "/updates/indicator");
-    });
+    // NOTE: do NOT refresh the indicator on `htmx:load`. That event fires after
+    // EVERY htmx swap — including this indicator's own outerHTML swap — so
+    // re-fetching here recurses into an infinite request loop (it hammered
+    // /updates/indicator thousands of times/sec and left the button un-clickable).
+    // The header lives in the base layout and is never part of a partial swap, so
+    // a one-time load on page load + the periodic check below are sufficient.
     setTimeout(function() {
       var indicator = document.querySelector("#header-update-indicator");
       if (indicator && !indicator.innerHTML.trim()) {

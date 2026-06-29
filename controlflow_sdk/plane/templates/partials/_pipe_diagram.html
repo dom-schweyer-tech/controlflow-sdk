@@ -14,11 +14,16 @@
 {% set box_h = 66 if has_narrative else 48 %}
 {% set gap_y = 34 %}
 {% set pad = 16 %}
+{# Reserve a header strip above each band so its label sits in the gutter, never on
+   top of the first node (audit C1). `top` is the vertical origin (extra room for the
+   first band's above-rect label); between bands the gap_y gutter already holds it. #}
+{% set band_hdr = 18 %}
+{% set top = pad + band_hdr %}
 {% set lane_gap = 56 %}
 {% set lane_pitch = box_w + lane_gap %}
 {% set lanes = diagram.lanes if diagram.lanes else 1 %}
 {% set width = (2 * pad) + (lanes * box_w) + ((lanes - 1) * lane_gap) %}
-{% set height = (diagram.rows * box_h) + ((diagram.rows - 1) * gap_y) + (2 * pad) %}
+{% set height = (diagram.rows * box_h) + ((diagram.rows - 1) * gap_y) + pad + top %}
 {% if diagram.procedures %}
 <ul class="fc-legend" aria-label="Procedures">
   {% for proc in diagram.procedures %}
@@ -33,8 +38,8 @@
   {# Swimlane band backgrounds (drawn first → behind edges/boxes). A band spans the
      inclusive row range row_start..row_end of the boxes it groups. #}
   {% for band in diagram.bands %}
-    {% set by1 = pad + (band.row_start * (box_h + gap_y)) - 6 %}
-    {% set by2 = pad + (band.row_end * (box_h + gap_y)) + box_h + 6 %}
+    {% set by1 = top + (band.row_start * (box_h + gap_y)) - 6 %}
+    {% set by2 = top + (band.row_end * (box_h + gap_y)) + box_h + 6 %}
     <rect class="fc-band{% if band.color %} fc-band-proc{% endif %}" x="2" y="{{ by1 }}"
           width="{{ width - 4 }}" height="{{ by2 - by1 }}" rx="10"
           style="{% if band.color %}stroke:{{ band.color }}{% endif %}" />
@@ -42,8 +47,8 @@
   {% for edge in diagram.edges %}
     {% set fx = pad + (edge.from_lane * lane_pitch) + (box_w / 2) %}
     {% set tx = pad + (edge.to_lane * lane_pitch) + (box_w / 2) %}
-    {% set y1 = pad + (edge.from_row * (box_h + gap_y)) + box_h %}
-    {% set y2 = pad + (edge.to_row * (box_h + gap_y)) %}
+    {% set y1 = top + (edge.from_row * (box_h + gap_y)) + box_h %}
+    {% set y2 = top + (edge.to_row * (box_h + gap_y)) %}
     {% if edge.from_lane == edge.to_lane %}
       {# same lane: straight vertical spine. #}
       <path class="fc-edge" d="M {{ fx }} {{ y1 }} L {{ tx }} {{ y2 }}" />
@@ -57,7 +62,7 @@
   {% endfor %}
   {% for box in diagram.boxes %}
     {% set x = pad + (box.lane * lane_pitch) %}
-    {% set y = pad + (box.row * (box_h + gap_y)) %}
+    {% set y = top + (box.row * (box_h + gap_y)) %}
     {% if box.summary %}
     {# Collapsed-procedure summary: a single dashed box standing in for the band's
        private steps. NOT a step-inspector link (it maps to no single node). #}
@@ -84,14 +89,16 @@
      ON TOP of the boxes (an opaque box rect would otherwise swallow the click).
      The Inputs band is not collapsible (plain text, no hx-get). #}
   {% for band in diagram.bands %}
-    {% set by1 = pad + (band.row_start * (box_h + gap_y)) - 6 %}
+    {% set by1 = top + (band.row_start * (box_h + gap_y)) - 6 %}
+    {# Label baseline sits ABOVE the band rect (in the header gutter), so it never
+       overprints the first node's title (audit C1). #}
     {% if band.key == '__inputs__' %}
-    <text class="fc-band-label" x="12" y="{{ by1 + 16 }}">▾ {{ band.label }}</text>
+    <text class="fc-band-label" x="12" y="{{ by1 - 6 }}">▾ {{ band.label }}</text>
     {% else %}
     <a href="/controls/{{ control_id }}/logic/flowchart?collapsed={{ band.toggle_collapsed }}"
        hx-get="/controls/{{ control_id }}/logic/flowchart?collapsed={{ band.toggle_collapsed }}"
        hx-target="#flowchart-card" hx-swap="outerHTML">
-      <text class="fc-band-label" x="12" y="{{ by1 + 16 }}">{{ '▸' if band.collapsed else '▾' }} {{ band.label }}</text>
+      <text class="fc-band-label" x="12" y="{{ by1 - 6 }}">{{ '▸' if band.collapsed else '▾' }} {{ band.label }}</text>
     </a>
     {% endif %}
   {% endfor %}
