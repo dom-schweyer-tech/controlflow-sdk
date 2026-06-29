@@ -340,6 +340,10 @@
       sec.setAttribute('data-proc-section', '');
       sec.setAttribute('data-band-key', pid);
       sec.setAttribute('open', '');
+      // Deliberately NO inline `style="--proc:…"`: the per-procedure accent colour
+      // (stripe + code-chip tint) is assigned server-side by position order, which the
+      // client can't know. A new section renders with the neutral `var(--proc, <token>)`
+      // fallbacks until the next #pipe-cards server render fills in the palette colour.
       sec.innerHTML =
         '<summary class="band-head proc-head-row">' +
         '<span class="band-caret" aria-hidden="true">▸</span>' +
