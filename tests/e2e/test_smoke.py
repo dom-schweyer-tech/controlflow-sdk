@@ -180,6 +180,11 @@ def test_author_run_export_smoke(page: Page, live_server: str, tmp_path: Path) -
     assert pid
     new_section.locator("[data-proc-code]").fill("P1")
     new_section.locator("[data-proc-name]").fill("Manual JE Review")
+    # 0032 teeth-check: the name renders at heading size (not the base 13px input).
+    expect(new_section.locator("[data-proc-name]")).to_have_css("font-size", "20px")
+    # The pencil focuses the name input (no toggle, no separate form).
+    new_section.locator("[data-proc-name-edit]").click()
+    expect(new_section.locator("[data-proc-name]")).to_be_focused()
     new_section.locator("[data-proc-assert]").fill("Segregation of Duties")
     # The procedure header owns the narrative (Unit 1); the Test node has no
     # procedure-identity fields (Unit 2).
