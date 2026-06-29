@@ -41,8 +41,8 @@
 - `controlflow_sdk/plane/static/app.css` — the `.band-*`/`.proc-*` block (~lines 700–799): carets, stripe, identity bar, code chip, name (specificity preserved), icon buttons, settings strip, peer labels, tolerance row, narrative. **Touched in Task 1.**
 - `controlflow_sdk/plane/templates/logic_builder.html` — `newProcedureSection()` JS builder (~lines 337–382): mirror the new structure. **Touched in Task 2.**
 - `tests/plane/test_logic_bands.py` — structural render test (migrate "Fail if"→"Tolerance", narrative hook). **Touched in Task 1.**
-- `tests/e2e/test_smoke.py` — collapse interaction (`.proc-dot`→`.band-caret`) + a computed-style teeth-check. **Touched in Task 1 (collapse) + Task 3 (teeth-check).**
-- `tests/e2e/test_multi_procedure.py` — add-procedure structural-parity + zero-`pageerror` assertion. **Touched in Task 2.**
+- `tests/e2e/test_smoke.py` — collapse interaction (`.proc-dot`→`.band-caret`) in Task 1; add-procedure structural-parity + zero-`pageerror` test in Task 2; a computed-style teeth-check in Task 3. **Touched in Tasks 1, 2, 3.**
+- `tests/e2e/test_multi_procedure.py` — not edited; re-run in Task 2 to confirm the builder save still round-trips.
 
 ---
 
@@ -310,7 +310,7 @@ git push -u origin HEAD
 
 **Files:**
 - Modify: `controlflow_sdk/plane/templates/logic_builder.html` (`newProcedureSection()`, ~337–382)
-- Test: `tests/e2e/test_multi_procedure.py` (add a structural-parity + zero-`pageerror` test)
+- Test: `tests/e2e/test_smoke.py` (add a structural-parity + zero-`pageerror` test, modeled on the existing `test_builder_collapse_and_section_insert` seeding idiom)
 
 **Interfaces:**
 - Consumes (from Task 1): the exact structure/classes emitted by the server template, which this builder must reproduce verbatim, plus the apostrophe-free `ASSERTION_HELP` copy.
@@ -318,26 +318,61 @@ git push -u origin HEAD
 
 - [ ] **Step 1: Write the failing e2e (add-procedure parity + no script error)**
 
-Append to `tests/e2e/test_multi_procedure.py`:
+Append to `tests/e2e/test_smoke.py` (modeled on `test_builder_collapse_and_section_insert`, which seeds a source + a one-procedure control via a `fetch`-POST; `json` is already imported there, and `get_by_role(name=...)` matches as a case-insensitive substring so no `re` import is needed):
 
 ```python
-def test_add_procedure_button_builds_the_new_card_shape(page, live_server):
+def test_add_procedure_button_builds_the_new_card_shape(page: Page, live_server: str) -> None:
     """Clicking ＋ Add procedure builds a section structurally identical to a
     server-rendered one, with no inline-script pageerror (learning 0040)."""
-    import re
+    base = live_server
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
+    csv_bytes = b"user_id\nU1\nU2\n"
 
-    # Seed a control with one procedure, open the builder.
-    _seed_two_procedure_control(page, live_server)  # see Step 3 note if a helper is needed
-    page.goto(f"{live_server}/controls/coltest/logic/builder")
+    # ── Minimal setup: source + control + pipeline with one procedure ────────
+    page.goto(base + "/sources/new")
+    page.fill("#s-id", "addsrc")
+    page.set_input_files(
+        "#s-file",
+        files=[{"name": "add.csv", "mimeType": "text/csv", "buffer": csv_bytes}],
+    )
+    page.fill("#s-asof", "2026-01-31")
+    page.click("button[type=submit]")
+    expect(page).to_have_url(base + "/sources/addsrc")
+
+    page.goto(base + "/controls/new")
+    page.fill("#f-id", "addtest")
+    page.fill("#f-title", "Add-procedure e2e control")
+    page.check("input[name='source_ids'][value='addsrc']")
+    page.click("button[type=submit]")
+    expect(page).to_have_url(base + "/controls/addtest")
+
+    graph_with_proc = json.dumps({
+        "nodes": [
+            {"id": "src", "type": "import", "source_id": "addsrc", "inputs": [], "config": {}},
+            {"id": "tst", "type": "test", "inputs": ["src"], "narrative": "", "config": {
+                "logic": "all", "procedure_id": "p1",
+                "conditions": [{"column": "user_id", "op": "not_empty"}],
+                "item_key_column": "user_id",
+            }},
+        ],
+        "procedures": [{"id": "p1", "code": "P1", "name": "Procedure Alpha", "position": 0}],
+    })
+    page.evaluate(
+        """async (args) => {
+            const fd = new FormData();
+            fd.append('pipeline_json', args.graph);
+            await fetch(args.url, {method: 'POST', body: fd, redirect: 'manual'});
+        }""",
+        {"url": f"{base}/controls/addtest/logic/builder", "graph": graph_with_proc},
+    )
+    page.goto(base + "/controls/addtest/logic/builder")
     page.wait_for_load_state("load")
 
+    # ── Click ＋ Add procedure; the new section must match the server shape ───
     before = page.locator("details[data-proc-section]").count()
-    page.get_by_role("button", name=re.compile("Add procedure")).click()
+    page.get_by_role("button", name="Add procedure").click()
     new = page.locator("details[data-proc-section]").last
-
-    # Structural parity with the server-rendered card.
     expect(new.locator(".band-caret")).to_have_count(1)
     expect(new.locator("[data-proc-head]")).to_have_count(1)
     for sel in ("[data-proc-code]", "[data-proc-name]", "[data-proc-assert]",
@@ -349,11 +384,11 @@ def test_add_procedure_button_builds_the_new_card_shape(page, live_server):
     assert errors == []
 ```
 
-> Note: reuse whatever seed/fixture pattern the existing tests in this file use (e.g. the `page`/`live_server` fixtures already imported there). If no single-control seed helper exists, inline the same setup the file's other tests use to reach `/controls/coltest/logic/builder`. Do not introduce `localStorage.setItem` to fake state (learning 0037).
+Do not introduce `localStorage.setItem` to fake state (learning 0037).
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `python -m pytest tests/e2e/test_multi_procedure.py::test_add_procedure_button_builds_the_new_card_shape -m browser -q`
+Run: `python -m pytest tests/e2e/test_smoke.py::test_add_procedure_button_builds_the_new_card_shape -m browser -q`
 Expected: FAIL (the builder still emits the old `.proc-dot`/`proc-title-row` shape; no `.band-caret`, no "Tolerance").
 
 - [ ] **Step 3: Rewrite `newProcedureSection()` to the new shape**
@@ -410,13 +445,13 @@ Note the tooltip text now contains **no apostrophes**, so it is safe inside the 
 
 - [ ] **Step 4: Run the new e2e + the existing multi-procedure e2e**
 
-Run: `python -m pytest tests/e2e/test_multi_procedure.py -m browser -q`
-Expected: PASS (new parity test + the existing add/threshold tests).
+Run: `python -m pytest tests/e2e/test_smoke.py::test_add_procedure_button_builds_the_new_card_shape tests/e2e/test_multi_procedure.py -m browser -q`
+Expected: PASS (new parity test + the existing two-procedure author/run/export flow, confirming the builder save still round-trips).
 
 - [ ] **Step 5: Commit + push**
 
 ```bash
-git add controlflow_sdk/plane/templates/logic_builder.html tests/e2e/test_multi_procedure.py
+git add controlflow_sdk/plane/templates/logic_builder.html tests/e2e/test_smoke.py
 git commit -m "Procedure header: mirror 3-tier shape in the Add-procedure JS builder"
 git push -u origin HEAD
 ```
