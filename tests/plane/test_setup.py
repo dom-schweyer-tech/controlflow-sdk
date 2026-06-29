@@ -18,7 +18,7 @@ def fresh_client(tmp_path: Path) -> TestClient:
 def test_first_run_shows_setup_screen(fresh_client: TestClient):
     resp = fresh_client.get("/")
     assert resp.status_code == 200
-    assert "Welcome to the Control Plane" in resp.text
+    assert "Welcome to Uticen Lite" in resp.text
     assert "Load the Northwind demo" in resp.text
     # No controls dashboard on first run.
     assert "New control" not in resp.text
@@ -73,7 +73,7 @@ def test_post_setup_blank_name_stays_on_setup(fresh_client: TestClient, tmp_path
     resp = fresh_client.post("/setup", data={"name": "   "}, follow_redirects=False)
     assert resp.status_code == 303
     assert repo.get_project(connect(tmp_path)) is None
-    assert "Welcome to the Control Plane" in fresh_client.get("/").text
+    assert "Welcome to Uticen Lite" in fresh_client.get("/").text
 
 
 def test_post_setup_demo_loads_runnable_engagement(fresh_client: TestClient, tmp_path: Path):

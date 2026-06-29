@@ -23,6 +23,7 @@
   <form method="post" action="/sources/from-url">
     <div class="field">
       <label for="u-id">Source ID</label>
+      <span class="hint">The code-facing variable name your logic references.</span>
       <input id="u-id" type="text" name="source_id" placeholder="e.g. api_users" required>
     </div>
     <div class="field">
@@ -41,7 +42,8 @@
       <input id="u-rp" type="text" name="record_path" value="{{ record_path or '' }}" placeholder="data.items">
     </div>
     <div class="field">
-      <label for="u-asof">Data as-of date</label>
+      <label for="u-asof">Data as-of date (optional)</label>
+      <span class="hint">The date this extract is current as of.</span>
       <input id="u-asof" type="date" name="as_of_date">
     </div>
     <div class="page-actions">
@@ -55,7 +57,7 @@
   <form method="post" action="/sources" enctype="multipart/form-data">
     <div class="field">
       <label for="s-id">Source ID</label>
-      <span class="hint">The code-facing variable name, e.g. <span class="mono">invoices</span>.</span>
+      <span class="hint">The code-facing variable name your logic references.</span>
       <input id="s-id" type="text" name="source_id" placeholder="e.g. invoices" required>
     </div>
     <div class="field">
@@ -69,9 +71,9 @@
       <input id="s-sheet" type="text" name="sheet" placeholder="e.g. Sheet1">
     </div>
     <div class="field">
-      <label for="s-asof">Data as-of date</label>
+      <label for="s-asof">Data as-of date (optional)</label>
       <span class="hint">The date this extract is current as of.</span>
-      <input id="s-asof" type="date" name="as_of_date" required>
+      <input id="s-asof" type="date" name="as_of_date">
     </div>
     <div class="page-actions">
       <button class="btn btn-primary" type="submit">Upload &amp; continue</button>

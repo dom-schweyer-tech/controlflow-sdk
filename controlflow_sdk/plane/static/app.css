@@ -8,7 +8,7 @@
   --bg-base:#0b0d17; --bg-surface-1:#12141f; --bg-surface-2:#1a1d2b;
   --bg-surface-3:#222638; --bg-input:#0f1119;
   /* text */
-  --text-primary:#e8e9ed; --text-secondary:#8b8fa3; --text-tertiary:#5c6078;
+  --text-primary:#e8e9ed; --text-secondary:#8b8fa3; --text-tertiary:#787e96;
   /* accent */
   --accent-primary:#3b82f6; --accent-hover:#60a5fa; --accent-muted:rgba(59,130,246,0.125);
   /* status */
@@ -38,7 +38,7 @@
   color-scheme: light;
   --bg-base:#f5f7fa; --bg-surface-1:#ffffff; --bg-surface-2:#eef1f6;
   --bg-surface-3:#e2e7ef; --bg-input:#ffffff;
-  --text-primary:#1a1d2b; --text-secondary:#566074; --text-tertiary:#8b93a7;
+  --text-primary:#1a1d2b; --text-secondary:#566074; --text-tertiary:#6f7891;
   --accent-primary:#2563eb; --accent-hover:#1d4ed8; --accent-muted:rgba(37,99,235,0.10);
   --status-success:#059669; --status-success-muted:rgba(5,150,105,0.12);
   --status-warning:#b45309; --status-warning-muted:rgba(217,119,6,0.13);
@@ -218,7 +218,9 @@ p { margin: 6px 0; color: var(--text-secondary); }
   background: var(--bg-surface-1);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-card);
-  overflow: hidden;
+  /* Scroll wide tables horizontally instead of clipping columns off-screen, so
+     row actions (e.g. Run) stay reachable on narrow viewports (audit I3). */
+  overflow-x: auto;
   box-shadow: var(--shadow-card);
 }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -240,9 +242,17 @@ td.shrink, th.shrink { width: 1%; white-space: nowrap; }
 .field:last-child { margin-bottom: 0; }
 label { display: block; }
 .field > label { font-size: 13px; font-weight: 500; color: var(--text-primary); }
-.field .hint { display: block; font-size: 12px; color: var(--text-tertiary); margin: 2px 0 6px; font-weight: 400; }
+/* Instructional help text uses the secondary (not tertiary) tier so guidance is
+   comfortably legible (audit D4). */
+.field .hint { display: block; font-size: 12px; color: var(--text-secondary); margin: 2px 0 6px; font-weight: 400; }
+/* A read-only field VALUE (not a hint) — primary tier so it reads as data (audit D5). */
+.field .field-value { display: block; font-size: 13px; color: var(--text-primary); margin-top: 6px; }
 
-input[type="text"], input[type="number"], input[type="file"], textarea, select {
+/* Style every text-like input, not just text/number/file — url and date fields
+   were falling back to browser-default width/chrome (audit G1). */
+input[type="text"], input[type="number"], input[type="file"], input[type="url"],
+input[type="date"], input[type="email"], input[type="search"], input[type="tel"],
+input[type="password"], textarea, select {
   font-family: var(--font-sans); font-size: 13px;
   color: var(--text-primary); background: var(--bg-input);
   border: 1px solid var(--border-default); border-radius: var(--radius-input);
@@ -288,13 +298,18 @@ legend {
   background: var(--bg-surface-2); border: 1px solid var(--border-strong);
   border-radius: 999px;
 }
-.source-chip .src-name { font-weight: 500; }
-.source-chip .mono.muted { font-size: 11px; }
+.source-chip .src-name { font-weight: 500; white-space: nowrap; }
+.source-chip .mono.muted { font-size: 11px; white-space: nowrap; }
+/* Icon controls get an equal, comfortable ~22px square target (audit F4). */
+.source-chip .chip-view, .source-chip .chip-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; line-height: 1;
+}
 .source-chip .chip-view { text-decoration: none; color: var(--text-secondary); }
 .source-chip .chip-view:hover { color: var(--accent-primary); }
 .source-chip .chip-remove {
   border: none; background: transparent; color: var(--text-secondary);
-  cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px;
+  cursor: pointer; font-size: 15px;
 }
 .source-chip .chip-remove:hover { color: var(--status-critical); }
 /* Searchable single-select combobox: the text field and the ▾ arrow share one
@@ -349,10 +364,18 @@ legend {
   color: var(--text-primary); cursor: pointer; line-height: 1;
 }
 .btn:hover, button:hover { background: var(--bg-surface-3); color: var(--text-primary); }
-.btn-primary, button[type="submit"] {
+/* Primary is opt-in via `.btn-primary` — NOT every submit button. A blanket
+   `button[type="submit"]` selector forced neutral and destructive submits blue and
+   scattered the page's single primary across every row action (audit F1/F2). */
+.btn-primary {
   background: var(--accent-primary); border-color: var(--accent-primary); color: #fff;
 }
-.btn-primary:hover, button[type="submit"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+/* Destructive intent reads as destructive (audit E5/F1). */
+.btn-danger {
+  background: var(--status-critical); border-color: var(--status-critical); color: #fff;
+}
+.btn-danger:hover { background: var(--status-critical-muted); border-color: var(--status-critical); color: var(--status-critical); }
 .btn-ghost, button.btn-ghost {
   background: transparent; border-color: var(--border-strong); color: var(--text-secondary);
 }
@@ -419,6 +442,8 @@ legend {
   border: 1px solid var(--border-default); border-radius: var(--radius-badge);
   padding: 2px 10px; font-family: var(--font-mono); font-size: 11px;
 }
+/* A human name (the engagement) is not code — render it in the UI sans (audit D1). */
+.chip.chip-name { font-family: var(--font-sans); font-size: 12px; }
 .badge {
   display: inline-block; border-radius: var(--radius-badge);
   padding: 2px 10px; font-size: 12px; font-weight: 600;
@@ -475,7 +500,9 @@ legend {
 
 /* ── workpaper embed ──────────────────────────────────────────────────────── */
 .workpaper-frame {
-  width: 100%; height: 720px;
+  /* Height is set to the document's scrollHeight on load (run_view.html) so the
+     workpaper is never cropped; this is the pre-JS fallback only (audit A4). */
+  width: 100%; height: auto; min-height: 600px;
   border: 1px solid var(--border-default); border-radius: var(--radius-card);
   background: var(--bg-base);
 }
@@ -681,13 +708,19 @@ legend {
   background: var(--bg-surface-2); margin-bottom: 14px; padding: 0 14px 8px;
 }
 .band-head {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  /* Top-align so the caret + color dot sit on the procedure TITLE row, not
+     centered against the tall multi-row column (audit C3). */
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px;
   padding: 12px 0 10px; cursor: pointer; list-style: none;
 }
 .band-head::-webkit-details-marker { display: none; }
 .band-head::before {
   content: "▸"; color: var(--text-tertiary); font-size: 12px; transition: transform .12s;
 }
+/* Nudge the procedure caret + dot down to the title line (the procedure header is
+   a tall column; the single-line Inputs band is unaffected). */
+.proc-head-row::before { margin-top: 7px; }
+.proc-head-row > .proc-dot { margin-top: 9px; }
 details[open] > .band-head::before { transform: rotate(90deg); }
 .band-title { font-weight: 600; font-size: 14px; }
 .band-sub { font-size: 12px; }
@@ -703,6 +736,9 @@ details[open] > .band-head::before { transform: rotate(90deg); }
 .proc-head .proc-in:focus {
   outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-muted);
 }
+/* Hold a usable width so the example placeholder isn't clipped when the row wraps
+   (audit C4). */
+.proc-head .proc-assert-in { flex: 1 1 220px; min-width: 220px; }
 .proc-head .proc-narr {
   flex: 1 0 100%; width: 100%; resize: vertical; min-height: 34px;
   font-family: inherit; line-height: 1.4;
@@ -761,3 +797,12 @@ details[open] > .band-head::before { transform: rotate(90deg); }
   border: 1px solid var(--border-strong); border-left-width: 3px;
 }
 .pipe-chips { gap: 6px; }
+
+/* ── narrow viewports ─────────────────────────────────────────────────────────
+   Desktop-first tool, but the header must not overflow on a small/odd window: let
+   it wrap to a second row and cap the engagement chip with an ellipsis (audit I2). */
+@media (max-width: 640px) {
+  .app-header-inner { flex-wrap: wrap; height: auto; gap: 8px 12px; padding: 8px 16px; }
+  .app-nav { order: 3; width: 100%; overflow-x: auto; }
+  .chip-name { max-width: 45vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

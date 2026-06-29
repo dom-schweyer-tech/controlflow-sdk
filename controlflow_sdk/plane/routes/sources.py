@@ -100,6 +100,16 @@ def register(
     templates: Jinja2Templates,
     get_conn: Callable[..., Generator[sqlite3.Connection, None, None]],
 ) -> None:
+    def _project(root: object) -> dict:
+        """Read the engagement so EVERY add-source response keeps the global nav +
+        chip. Hardcoding ``{"name": ""}`` dropped the whole header on the URL tab and
+        on form errors (audit B1). Opens its own connection (learning 0002)."""
+        conn = connect(root)  # type: ignore[arg-type]
+        try:
+            return repo.get_project(conn) or {"name": ""}
+        finally:
+            conn.close()
+
     @app.get("/sources", response_class=HTMLResponse)
     def list_sources(
         request: Request,
@@ -138,7 +148,7 @@ def register(
         def _err(msg: str) -> HTMLResponse:
             return templates.TemplateResponse(
                 request, "source_new.html",
-                {"project": {"name": ""}, "error": msg}, status_code=200,
+                {"project": _project(root), "error": msg}, status_code=200,
             )
 
         if fmt is None:
@@ -197,7 +207,8 @@ def register(
     @app.get("/sources/from-url", response_class=HTMLResponse)
     def new_source_from_url(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
-            request, "source_new.html", {"project": {"name": ""}, "mode": "url"},
+            request, "source_new.html",
+            {"project": _project(request.app.state.project_root), "mode": "url"},
         )
 
     @app.post("/sources/from-url", response_model=None)
@@ -214,7 +225,7 @@ def register(
         def _err(msg: str) -> HTMLResponse:
             return templates.TemplateResponse(
                 request, "source_new.html",
-                {"project": {"name": ""}, "mode": "url", "error": msg,
+                {"project": _project(root), "mode": "url", "error": msg,
                  "url": url, "record_path": record_path}, status_code=200,
             )
 

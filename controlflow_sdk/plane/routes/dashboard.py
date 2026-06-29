@@ -7,6 +7,8 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from controlflow_sdk.model.control import Threshold
+from controlflow_sdk.model.workpaper import Determination
 from controlflow_sdk.store import repo
 from controlflow_sdk.upgrade.spawn import read_status
 
@@ -30,7 +32,16 @@ def register(
         rows = []
         for c in controls:
             latest = repo.latest_run(conn, c["id"])
-            rows.append({"control": c, "latest": latest})
+            # The last-run badge passes/fails by the control's threshold — the same
+            # determination the workpaper uses — never raw `failed == 0` (audit A1).
+            passed = None
+            if latest is not None:
+                threshold = Threshold(
+                    failure_threshold_pct=c.get("failure_threshold_pct"),
+                    failure_threshold_count=c.get("failure_threshold_count"),
+                )
+                passed = Determination(threshold, latest["failed"], latest["total"]).passed
+            rows.append({"control": c, "latest": latest, "passed": passed})
         notice = read_status(request.app.state.project_root)
         return templates.TemplateResponse(
             request,

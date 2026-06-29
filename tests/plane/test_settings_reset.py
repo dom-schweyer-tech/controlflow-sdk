@@ -12,6 +12,18 @@ def test_settings_page_has_reset_form(client: TestClient):
     assert 'action="/settings/reset-demo"' in resp.text
 
 
+def test_reset_button_is_destructive_not_primary(client: TestClient):
+    """E5/F1: the irreversible reset must read as destructive, and the stylesheet
+    must define a danger variant rather than blanket-promoting every submit to
+    primary-blue (F2)."""
+    page = client.get("/settings").text
+    assert 'class="btn btn-danger"' in page  # reset carries the danger variant
+    css = client.get("/static/app.css").text
+    assert ".btn-danger" in css
+    # the primary rule no longer hijacks every submit button (selector-list form gone)
+    assert ', button[type="submit"]' not in css
+
+
 def test_reset_demo_wipes_junk_and_reloads(client: TestClient, engagement: Path):
     # Seed a junk control into the engagement store the way a corrupted
     # engagement would carry one.

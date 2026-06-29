@@ -208,10 +208,13 @@
     </div>
 
     {# Support steps (Import/Filter/Join/Custom) show the derived procedure chips
-       read-only — they belong to the union of procedures their terminals own. #}
-    {% if node.type != 'test' and band_shared|default(false) and node_procedures is defined and node_procedures.get(node.id) %}
+       read-only — they belong to the union of procedures their terminals own. A
+       lone auto-derived procedure carries an empty code (learning 0036); skip those
+       so we never render a blank pill (audit C2). #}
+    {% set membership_chips = node_procedures.get(node.id, []) | selectattr('code') | list if node_procedures is defined else [] %}
+    {% if node.type != 'test' and band_shared|default(false) and membership_chips %}
     <div class="pipe-row pipe-chips">
-      {% for chip in node_procedures.get(node.id, []) %}
+      {% for chip in membership_chips %}
       <span class="proc-chip" style="border-color:{{ chip.color }}">{{ chip.code }}</span>
       {% endfor %}
     </div>

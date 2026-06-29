@@ -698,6 +698,9 @@ def _procedure_context(pipeline: Pipeline | None) -> dict[str, Any]:
         procedures = [
             {
                 "id": p.id,
+                # A SOLE auto-derived procedure keeps an EMPTY code for render/bundle
+                # byte-identity (learning 0036). The builder hides the empty membership
+                # pill at the view layer instead of forcing a label here (audit C2).
                 "code": p.code or (f"P{i + 1}" if len(eff) > 1 else ""),
                 "name": p.name,
                 "assertion": p.assertion,

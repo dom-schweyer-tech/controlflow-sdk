@@ -6,13 +6,10 @@
   <div class="card-head" style="border:none;padding:0;margin:0;">
     <h1>Run results</h1>
     <div class="spacer"></div>
-    {% if run.failed == 0 %}
-      <span class="pill ok">Operated effectively</span>
-    {% else %}
-      <span class="pill bad">Operated with deficiencies</span>
-    {% endif %}
+    <span class="pill {{ 'ok' if passed else 'bad' }}">{{ verdict }}</span>
   </div>
   <p class="muted mono">{{ control_id }}</p>
+  {% if threshold_text %}<p class="muted">{{ threshold_text }}</p>{% endif %}
 </div>
 
 <div class="tiles">
@@ -20,11 +17,11 @@
     <div class="tile-label">Records tested</div>
     <div class="tile-value">{{ run.total }}</div>
   </div>
-  <div class="tile {{ 'bad' if run.failed else 'ok' }}">
-    <div class="tile-label">Failed</div>
+  <div class="tile {{ '' if passed else 'bad' }}">
+    <div class="tile-label">Exceptions</div>
     <div class="tile-value">{{ run.failed }}</div>
   </div>
-  <div class="tile {{ 'ok' if run.failed == 0 else 'warn' }}">
+  <div class="tile {{ 'ok' if passed else 'warn' }}">
     <div class="tile-label">Pass rate</div>
     <div class="tile-value">{{ run.pass_rate }}%</div>
   </div>
@@ -61,6 +58,10 @@
 
 {% if workpaper_html %}
 <h2 style="margin-top:24px;">Workpaper</h2>
-<iframe class="workpaper-frame" srcdoc="{{ workpaper_html | e }}"></iframe>
+{# Auto-size the frame to its content so the workpaper is never cropped and the page
+   scrolls as one document (no nested scroll trap). srcdoc is same-origin (audit A4). #}
+<iframe class="workpaper-frame" srcdoc="{{ workpaper_html | e }}"
+        onload="(function(f){try{var d=f.contentWindow.document.documentElement;
+                f.style.height=(d.scrollHeight+2)+'px';}catch(e){}})(this)"></iframe>
 {% endif %}
 {% endblock %}
