@@ -6,7 +6,7 @@ Author and run full-population control tests; export audit-grade workpapers impo
 
 Uticen SDK is a pure-Python library for authoring, running, and packaging control tests against
 full populations of data. The **control plane** (`controlplane`) is a local web app — served entirely
-on `127.0.0.1`, zero network egress by default — where you author sources and controls through a browser UI, run
+on `127.0.0.1`, localhost-only — where you author sources and controls through a browser UI, run
 tests, and export an import bundle for the Uticen audit platform.
 
 Test results and workpapers produced by the SDK are structurally equivalent to those generated
@@ -222,10 +222,10 @@ Then upload `bundle.zip` at **Settings → Imports** in the Uticen app.
 - **Brittle by design.** The SDK trusts the folder convention. It has no locking, no user accounts,
   and no conflict resolution — it is a local, single-user tool. The hardened multi-user experience
   (access control, concurrency, audit trails, sign-off workflows) is the paid Uticen app.
-- **Localhost only, zero network egress by default.** `controlplane` listens on `127.0.0.1:8765` and
-  makes no outbound connections — the one exception is an **opt-in** update check (Settings ▸ Updates,
-  off by default) that, only when you enable it, asks your configured package index for the latest
-  version number. Client data never leaves the machine.
+- **Localhost only; client data never leaves the machine.** `controlplane` listens on
+  `127.0.0.1:8765`. Its one outbound connection is a launch update check (Settings ▸ Updates,
+  **on by default**) that asks your configured package index for the latest version number — never any
+  client data. Turn the check **off** in Settings ▸ Updates for zero network egress.
 
 ## Workpaper quality
 
