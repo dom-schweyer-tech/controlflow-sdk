@@ -30,6 +30,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+        env:
+          # The self-hosted runner has no writable hosted-tool-cache: setup-python's
+          # install script defaults to /Users/runner/hostedtoolcache and dies with
+          # "mkdir: /Users/runner: Permission denied". Redirect both the action's
+          # cache dir and the install script's target to the job's writable temp.
+          RUNNER_TOOL_CACHE: ${{ runner.temp }}/hostedtoolcache
+          AGENT_TOOLSDIRECTORY: ${{ runner.temp }}/hostedtoolcache
 
       # Produce coverage.xml so the scan can report line coverage (Sonar reads
       # it via sonar.python.coverage.reportPaths). An isolated venv keeps the
