@@ -54,7 +54,7 @@ def _ai_configured(conn: sqlite3.Connection) -> bool:
 def _build_sample(conn: sqlite3.Connection, root: Path, source_id: str) -> dict[str, Any] | None:
     """Load the primary source and return ``{columns, schema, rows}`` for the AI
     layer. Returns ``None`` when the source has no usable data file yet."""
-    from uticen_lite.adapters.files import UnsupportedSourceError, source_for
+    from uticen_lite.adapters.files import source_for
     from uticen_lite.store.loader import load_project_from_store
 
     project = load_project_from_store(conn)
@@ -63,8 +63,9 @@ def _build_sample(conn: sqlite3.Connection, root: Path, source_id: str) -> dict[
         return None
     try:
         pop = source_for(binding, root).load()
-    except (UnsupportedSourceError, OSError, ValueError):
-        # FileNotFoundError is a subclass of OSError, so it is already covered.
+    except (OSError, ValueError):
+        # UnsupportedSourceError subclasses ValueError and FileNotFoundError
+        # subclasses OSError, so both are already covered here.
         return None
 
     cols = [c for c in pop.columns if c.include]
